@@ -64,6 +64,13 @@ const intOf = (row: Row, column: string): number => {
   return Number(v);
 };
 
+/** A decimal number such as a story's priority (topic weight decayed by age, three decimals). */
+const numberOf = (row: Row, column: string): number => {
+  const v = cellOf(row, column);
+  if (!/^-?\d+(?:\.\d+)?$/.test(v)) throw new Error(`${column} is not a number: "${v.slice(0, 40)}"`);
+  return Number(v);
+};
+
 const boolOf = (row: Row, column: string): boolean => {
   const v = cellOf(row, column);
   if (v !== "true" && v !== "false") throw new Error(`${column} must be true or false, found "${v.slice(0, 40)}"`);
@@ -137,7 +144,7 @@ const storyFromRow = (row: Row): Story =>
       riskTier: cellOf(r, "risk_tier"),
       riskFlags: jsonOf(r, "risk_flags"),
       disputed: boolOf(r, "disputed"),
-      priority: intOf(r, "priority"),
+      priority: numberOf(r, "priority"),
       firstSeenAt: cellOf(r, "first_seen_at"),
       updatedAt: cellOf(r, "updated_at"),
       ...opt("expiresAt", cellOf(r, "expires_at"), iso),

@@ -144,11 +144,13 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
     });
 
     it("list stories by status, most urgent first", async () => {
-      const low = makeStory(h.clock.now(), { status: "triaged", priority: 1 });
+      // Regression (first real draft run, 2026-10-30): priorities have decimals, and the Sheet must read them back.
+      const low = makeStory(h.clock.now(), { status: "triaged", priority: 1.25 });
       const high = makeStory(h.clock.now(), { status: "triaged", priority: 9, topic: "weather" });
       const other = makeStory(h.clock.now(), { status: "discarded", priority: 99 });
       for (const story of [low, high, other]) await s.stories.insert(story);
       expect((await s.stories.listByStatus(["triaged"], 10)).map((x) => x.id)).toEqual([high.id, low.id]);
+      expect((await s.stories.get(low.id))?.priority).toBe(1.25);
       expect(await s.stories.listByStatus([], 10)).toEqual([]);
     });
   });
