@@ -35,7 +35,7 @@ jobs:
         env:
           SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
           SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
-          CLOUDINARY_CLOUD_NAME: ${{ vars.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
           CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
           CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}

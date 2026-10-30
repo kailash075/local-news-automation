@@ -82,6 +82,7 @@ Repository **secrets**:
 |---|---|---|
 | `SHEET_BRIDGE_URL` | 1 | The Apps Script web app URL, ending in `/exec` (§4, step 6) |
 | `SHEET_BRIDGE_KEY` | 1 | The same value as the Script property `BRIDGE_KEY` (§4, steps 4 and 5) |
+| `CLOUDINARY_CLOUD_NAME` | 1 | Cloudinary dashboard (§5). Not really secret (it is in every image link), but kept with the other two Cloudinary values, as in Coimbatore 360. |
 | `CLOUDINARY_API_KEY` | 1 | Cloudinary dashboard (§5) |
 | `CLOUDINARY_API_SECRET` | 1 | Cloudinary dashboard (§5) |
 | `TOKEN_ENCRYPTION_KEY` | 1 | 32 random bytes, base64: `openssl rand -base64 32`. Keep an offline copy in your password manager; without it the stored Instagram token cannot be read. |
@@ -98,7 +99,6 @@ Repository **variables** (not secret). The names match what the workflows in `.g
 | `PUBLISH_ON_APPROVAL` | off | When `true`, an approval starts `publish.yml` at once |
 | `EDITOR_GITHUB_LOGINS` | none (nobody can run commands) | Comma-separated logins allowed to run review commands. Set to `kailash075`. |
 | `OWNER_GITHUB_LOGIN` | none (nobody can switch publishing on) | The only login that can switch publishing on. Set to `kailash075`. |
-| `CLOUDINARY_CLOUD_NAME` | | Cloudinary cloud name (§5) |
 | `CLOUDINARY_FOLDER` | `erodeglitz` | Folder for card images in Cloudinary |
 | `IG_GRAPH_VERSION` | `v26.0` | Pinned Graph API version |
 | `POSTING_WINDOW_IST` | `08:00-21:00` | No posts outside this window (owner decision, 2026-10-30) |
@@ -150,7 +150,7 @@ Instagram downloads each image from a public URL. Coimbatore 360 uses Cloudinary
 
 1. Sign up at <https://cloudinary.com> with `erodeglitz@gmail.com` on the **Free** plan. Do not add a card. Check the current Free plan limits on the pricing page; at about 6 cards a day of roughly 300 KB each, ErodeGlitz uses a few hundred MB a year.
 2. From the dashboard, copy:
-   - the **cloud name** into the variable `CLOUDINARY_CLOUD_NAME`;
+   - the **cloud name** into the secret `CLOUDINARY_CLOUD_NAME`;
    - the **API key** into the secret `CLOUDINARY_API_KEY`;
    - the **API secret** into the secret `CLOUDINARY_API_SECRET`.
 3. Do not create an unsigned upload preset. The jobs sign every upload with the API secret, so nobody else can upload to the account.
