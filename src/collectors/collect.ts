@@ -10,7 +10,7 @@ import {
   sha256Hex,
   truncateGraphemes,
 } from "../pipeline/normalise.ts";
-import { extractListingLinks, parseFeed, parseSitemap, type FeedError } from "./feeds.ts";
+import { extractListingLinks, extractPublishedTime, parseFeed, parseSitemap, type FeedError } from "./feeds.ts";
 import { httpGet, type FetchLike, type HttpGetError } from "./http.ts";
 import { isAllowed, parseRobots } from "./robots.ts";
 
@@ -18,6 +18,15 @@ import { isAllowed, parseRobots } from "./robots.ts";
 export const DISABLE_AFTER_FAILURES = 6;
 
 export const DEFAULT_MAX_ITEMS_PER_RUN = 50;
+
+/**
+ * Listing pages give no dates, so each new article is opened once to read its publication time (Coimbatore 360 does the
+ * same). Articles without a readable date are skipped, so old stories on a listing page never pass as today's news.
+ */
+export const MAX_ARTICLE_FETCHES_PER_RUN = 15;
+const ARTICLE_PAUSE_MS = 1500;
+/** A publication time further ahead than this is a broken page, not a date. */
+const MAX_FUTURE_SKEW_MS = 60 * 60_000;
 
 /** Per-run cache of robots decisions by origin, so sources on one site fetch robots.txt once. */
 export type RobotsEntry = { kind: "rules"; text: string } | { kind: "allow_all" } | { kind: "unreachable"; message: string };
@@ -31,6 +40,8 @@ export type CollectDeps = {
   fetch?: FetchLike;
   robotsCache?: RobotsCache;
   maxItemsPerRun?: number;
+  /** Wait between article requests. Defaults to a real timer. */
+  pause?: (ms: number) => Promise<void>;
 };
 
 export type CollectOutcome =
@@ -43,6 +54,8 @@ export type CollectOutcome =
       seen: number;
       /** Candidates dropped as unusable (bad URL, empty title, off-site). */
       invalid: number;
+      /** New listing-page articles skipped because no publication time could be read (tried again next run). */
+      undated: number;
       inserted: readonly SourceItem[];
     }
   | { status: "failed"; sourceId: string; error: string; consecutiveFailures: number; shouldDisable: boolean };
@@ -63,8 +76,7 @@ const describeHttpError = (e: HttpGetError): string => {
   }
 };
 
-const robotsDecision = async (source: Source, deps: CollectDeps): Promise<Result<true, string>> => {
-  const url = new URL(source.url);
+const robotsDecision = async (url: URL, deps: CollectDeps): Promise<Result<true, string>> => {
   const cache: RobotsCache = deps.robotsCache ?? new Map<string, RobotsEntry>();
   let entry = cache.get(url.origin);
   if (entry === undefined) {
@@ -127,6 +139,21 @@ const candidatesFrom = (source: Source, body: string, finalUrl: string): Result<
   }
 };
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Opens one article (robots.txt permitting) and reads only its publication time; the body is not kept. */
+const articlePublishedAt = async (url: string, now: Date, deps: CollectDeps): Promise<Date | undefined> => {
+  const robots = await robotsDecision(new URL(url), deps);
+  if (!robots.ok) return undefined;
+  const res = await httpGet(
+    { url, accept: "text/html" },
+    { contactUrl: deps.contactUrl, now: deps.clock.now, ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }) },
+  );
+  if (!res.ok || res.value.kind !== "ok") return undefined;
+  const publishedAt = extractPublishedTime(res.value.body);
+  return publishedAt !== undefined && publishedAt.getTime() <= now.getTime() + MAX_FUTURE_SKEW_MS ? publishedAt : undefined;
+};
+
 const NewSourceItemSchema = SourceItemSchema.omit({ id: true });
 
 /** Builds a validated item: metadata and a short excerpt only, never the article body. */
@@ -177,7 +204,7 @@ export const collectSource = async (source: Source, deps: CollectDeps): Promise<
     };
   };
 
-  const robots = await robotsDecision(source, deps);
+  const robots = await robotsDecision(new URL(source.url), deps);
   if (!robots.ok) {
     return robots.error.startsWith("robots.txt disallows")
       ? { status: "skipped", sourceId: source.id, reason: robots.error }
@@ -207,11 +234,28 @@ export const collectSource = async (source: Source, deps: CollectDeps): Promise<
   const limit = deps.maxItemsPerRun ?? DEFAULT_MAX_ITEMS_PER_RUN;
   const inserted: SourceItem[] = [];
   let invalid = 0;
+  let undated = 0;
+  let articleFetches = 0;
   for (const candidate of candidates.value.slice(0, limit)) {
-    const item = toNewSourceItem(source, candidate, page.finalUrl, now);
+    let item = toNewSourceItem(source, candidate, page.finalUrl, now);
     if (item === undefined) {
       invalid += 1;
       continue;
+    }
+    if (item.publishedAt === undefined && source.kind === "listing_page") {
+      if (await deps.sourceItems.isKnown(item.sourceId, item.urlHash)) continue;
+      if (articleFetches >= MAX_ARTICLE_FETCHES_PER_RUN) {
+        undated += 1;
+        continue;
+      }
+      if (articleFetches > 0) await (deps.pause ?? sleep)(ARTICLE_PAUSE_MS);
+      articleFetches += 1;
+      const publishedAt = await articlePublishedAt(item.canonicalUrl, now, deps);
+      if (publishedAt === undefined) {
+        undated += 1;
+        continue;
+      }
+      item = { ...item, publishedAt: IsoDateTimeSchema.parse(publishedAt.toISOString()) };
     }
     const r = await deps.sourceItems.insertIfNew(item);
     if (r.inserted) inserted.push(r.item);
@@ -225,5 +269,5 @@ export const collectSource = async (source: Source, deps: CollectDeps): Promise<
     ...(page.lastModified === undefined ? {} : { lastModified: page.lastModified }),
   };
   await deps.sourceState.saveFetchState(next);
-  return { status: "fetched", sourceId: source.id, seen: candidates.value.length, invalid, inserted };
+  return { status: "fetched", sourceId: source.id, seen: candidates.value.length, invalid, undated, inserted };
 };

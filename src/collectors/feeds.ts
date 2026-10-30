@@ -164,6 +164,23 @@ export const parseSitemap = (xml: string): Result<readonly SitemapEntry[], FeedE
 
 export type ListingLink = { url: string; title: string };
 
+const PUBLISHED_TIME = [
+  /<meta\b[^>]*\bproperty\s*=\s*["']article:published_time["'][^>]*\bcontent\s*=\s*["']([^"']+)["']/i,
+  /<meta\b[^>]*\bcontent\s*=\s*["']([^"']+)["'][^>]*\bproperty\s*=\s*["']article:published_time["']/i,
+  /"datePublished"\s*:\s*"([^"]+)"/,
+];
+
+/** An article page's publication time: `article:published_time`, else the first JSON-LD `datePublished`. */
+export const extractPublishedTime = (html: string): Date | undefined => {
+  for (const pattern of PUBLISHED_TIME) {
+    const value = pattern.exec(html)?.[1];
+    if (value === undefined) continue;
+    const time = Date.parse(value);
+    if (!Number.isNaN(time)) return new Date(time);
+  }
+  return undefined;
+};
+
 const ANCHOR = /<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi;
 const attr = (attrs: string, name: string): string | undefined => {
   const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(attrs);

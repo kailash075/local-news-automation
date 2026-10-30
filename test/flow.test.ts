@@ -69,26 +69,28 @@ const noWriteInstagram: InstagramClient = {
 };
 
 describe("Erode flow, Coimbatore 360 pattern with an editor in the loop", () => {
-  it("collect is refused while the Sheet switch is off, and no registered source is fetchable yet", async () => {
+  it("collect is refused while the Sheet switch is off, and only owner-approved sources are fetched", async () => {
     const clock = testClock();
     const stores = createMemoryStores(clock);
     const off = await runCollect({ ...stores, settings: stores.settings, clock, contactUrl: "https://example.org", sources: SOURCES });
     expect(off.status).toBe("switched_off");
 
     await stores.settings.setSwitch("collecting_enabled", true, "kailash075", "test");
-    let fetched = 0;
+    const fetchedHosts = new Set<string>();
     const report = await runCollect({
       ...stores,
       clock,
       contactUrl: "https://example.org",
       sources: SOURCES,
-      fetch: () => {
-        fetched += 1;
+      fetch: (input) => {
+        fetchedHosts.add(new URL(input).host);
         return Promise.resolve(new Response("", { status: 500 }));
       },
     });
     expect(report.status).toBe("done");
-    expect(fetched).toBe(0); // every real source still waits for its terms review
+    const approvedHosts = new Set(SOURCES.filter((s) => s.termsReview.status === "approved" && s.kind !== "editor_tip").map((s) => new URL(s.url).host));
+    expect(fetchedHosts.size).toBeGreaterThan(0);
+    for (const host of fetchedHosts) expect(approvedHosts.has(host), host).toBe(true);
   });
 
   const start = new Date("2026-10-30T04:30:00Z"); // 10:00 IST

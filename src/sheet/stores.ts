@@ -381,12 +381,15 @@ const createSourceItemStore = (bridge: BridgeClient, clock: Clock): SourceItemSt
   /** (source, url hash) pairs already in the Sheet. Rows are never deleted, so a known pair stays known. */
   let known: Set<string> | undefined;
   const keyOf = (sourceId: string, urlHash: string): string => `${sourceId} ${urlHash}`;
+  const knownKeys = async (): Promise<Set<string>> =>
+    (known ??= new Set((await bridge.select(table, undefined, ["source_id", "url_hash"])).map((r) => keyOf(cellOf(r, "source_id"), cellOf(r, "url_hash")))));
 
   return {
+    isKnown: async (sourceId, urlHash) => (await knownKeys()).has(keyOf(sourceId, urlHash)),
     insertIfNew: async (item) => {
-      known ??= new Set((await bridge.select(table, undefined, ["source_id", "url_hash"])).map((r) => keyOf(cellOf(r, "source_id"), cellOf(r, "url_hash"))));
+      const keys = await knownKeys();
       const key = keyOf(item.sourceId, item.urlHash);
-      if (known.has(key)) return { inserted: false };
+      if (keys.has(key)) return { inserted: false };
       const row: Row = {
         id: uuidv7(clock.now()),
         source_id: item.sourceId,
@@ -401,7 +404,7 @@ const createSourceItemStore = (bridge: BridgeClient, clock: Clock): SourceItemSt
         story_id: "",
       };
       const inserted = await insertOnce(bridge, table, row, ["source_id", "url_hash"]);
-      known.add(key);
+      keys.add(key);
       return inserted ? { inserted: true, item: sourceItemFromRow(row) } : { inserted: false };
     },
     listUnassigned: async (limit) =>

@@ -48,7 +48,10 @@ export const runCollect = async (deps: CollectRunDeps): Promise<CollectRunReport
     switch (outcome.status) {
       case "fetched":
         newItems += outcome.inserted.length;
-        lines.push(`- ${source.name}: ${outcome.seen} seen, ${outcome.inserted.length} new, ${outcome.invalid} unusable`);
+        lines.push(
+          `- ${source.name}: ${outcome.seen} seen, ${outcome.inserted.length} new, ${outcome.invalid} unusable` +
+            (outcome.undated === 0 ? "" : `, ${outcome.undated} new without a readable date (skipped)`),
+        );
         break;
       case "not_modified":
         lines.push(`- ${source.name}: not modified`);

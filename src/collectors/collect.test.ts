@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { NewSourceItem, SourceFetchState, SourceItemStore, SourceStateStore } from "../domain/ports.ts";
 import { IsoDateTimeSchema, SourceItemIdSchema, SourceSchema, type Source, type SourceId, type SourceItem } from "../domain/types.ts";
-import { DISABLE_AFTER_FAILURES, collectSource, type CollectDeps, type RobotsCache } from "./collect.ts";
+import { DISABLE_AFTER_FAILURES, MAX_ARTICLE_FETCHES_PER_RUN, collectSource, type CollectDeps, type RobotsCache } from "./collect.ts";
 import type { FetchLike } from "./http.ts";
 
 const CONTACT = "https://github.com/kailash075/local-news-automation";
@@ -55,6 +55,7 @@ class MemoryStores {
       this.items.push(stored);
       return Promise.resolve({ inserted: true, item: stored });
     },
+    isKnown: (sourceId, urlHash) => Promise.resolve(this.items.some((i) => i.sourceId === sourceId && i.urlHash === urlHash)),
     listUnassigned: () => Promise.resolve(this.items),
     attachToStory: () => Promise.resolve(),
     listForStory: () => Promise.resolve([]),
@@ -195,21 +196,76 @@ describe("collectSource", () => {
     expect(out).toMatchObject({ status: "failed", consecutiveFailures: DISABLE_AFTER_FAILURES, shouldDisable: true });
   });
 
-  it("reads titles from a listing page with the source's link pattern", async () => {
+  const listing = source({
+    id: SourceSchema.shape.id.parse("erode-page"),
+    kind: "listing_page",
+    url: "https://example.com/district/erode",
+    linkPattern: "^(/news/\\d+)$",
+  });
+  const LISTING = '<a href="/news/7">பவானியில் சாலை பணி</a><a href="/news/8">கொடுமுடியில் விழா</a><a href="/about">About</a>';
+  const article = (published: string): Route => () => new Response(`<meta property="article:published_time" content="${published}">`);
+
+  it("reads titles from a listing page and each new article's publication time", async () => {
     const stores = new MemoryStores();
-    const listing = source({
-      id: SourceSchema.shape.id.parse("erode-page"),
-      kind: "listing_page",
-      url: "https://example.com/district/erode",
-      linkPattern: "^(/news/\\d+)$",
-    });
+    const pauses: number[] = [];
     const { fetch } = router({
       "https://example.com/robots.txt": () => new Response(""),
-      "https://example.com/district/erode": () =>
-        new Response('<a href="/news/7">பவானியில் சாலை பணி</a><a href="/news/8">கொடுமுடியில் விழா</a><a href="/about">About</a>'),
+      "https://example.com/district/erode": () => new Response(LISTING),
+      "https://example.com/news/7": article("2026-10-30T09:00:00+05:30"),
+      "https://example.com/news/8": () => new Response('{"datePublished":"2026-10-29T20:00:00Z"}'),
     });
-    const out = await collectSource(listing, deps(stores, fetch));
-    expect(out).toMatchObject({ status: "fetched", seen: 2 });
-    expect(stores.items.map((i) => i.title)).toEqual(["பவானியில் சாலை பணி", "கொடுமுடியில் விழா"]);
+    const out = await collectSource(listing, deps(stores, fetch, { pause: (ms) => (pauses.push(ms), Promise.resolve()) }));
+    expect(out).toMatchObject({ status: "fetched", seen: 2, undated: 0 });
+    expect(stores.items.map((i) => [i.title, i.publishedAt])).toEqual([
+      ["பவானியில் சாலை பணி", "2026-10-30T03:30:00.000Z"],
+      ["கொடுமுடியில் விழா", "2026-10-29T20:00:00.000Z"],
+    ]);
+    expect(pauses).toHaveLength(1); // between the two article requests, not before the first
+  });
+
+  it("regression: an article without a readable date is not stored, so old news cannot pass as new", async () => {
+    const stores = new MemoryStores();
+    const { fetch } = router({
+      "https://example.com/robots.txt": () => new Response(""),
+      "https://example.com/district/erode": () => new Response(LISTING),
+      "https://example.com/news/7": () => new Response("<p>no date here</p>"),
+      "https://example.com/news/8": article("2099-01-01T00:00:00Z"),
+    });
+    const out = await collectSource(listing, deps(stores, fetch, { pause: () => Promise.resolve() }));
+    expect(out).toMatchObject({ status: "fetched", seen: 2, undated: 2, inserted: [] });
+    expect(stores.items).toEqual([]);
+  });
+
+  it("does not open known articles again, and obeys robots.txt for article paths", async () => {
+    const stores = new MemoryStores();
+    const routes = {
+      "https://example.com/robots.txt": () => new Response("User-agent: *\nDisallow: /news/8\n"),
+      "https://example.com/district/erode": () => new Response(LISTING),
+      "https://example.com/news/7": article("2026-10-30T05:00:00Z"),
+      "https://example.com/news/8": article("2026-10-30T05:00:00Z"),
+    };
+    const first = router(routes);
+    expect(await collectSource(listing, deps(stores, first.fetch, { pause: () => Promise.resolve() }))).toMatchObject({ undated: 1 });
+    expect(first.calls).not.toContain("https://example.com/news/8");
+    expect(stores.items).toHaveLength(1);
+
+    const second = router(routes);
+    const later = new Date(now.getTime() + 2 * 3_600_000);
+    await collectSource(listing, deps(stores, second.fetch, { clock: { now: () => later }, pause: () => Promise.resolve() }));
+    expect(second.calls).not.toContain("https://example.com/news/7");
+  });
+
+  it("opens at most MAX_ARTICLE_FETCHES_PER_RUN articles per run", async () => {
+    const stores = new MemoryStores();
+    const count = MAX_ARTICLE_FETCHES_PER_RUN + 3;
+    const links = Array.from({ length: count }, (_, i) => `<a href="/news/${i + 1}">செய்தி ${i + 1}</a>`).join("");
+    const { fetch, calls } = router({
+      "https://example.com/robots.txt": () => new Response(""),
+      "https://example.com/district/erode": () => new Response(links),
+      ...Object.fromEntries(Array.from({ length: count }, (_, i) => [`https://example.com/news/${i + 1}`, article("2026-10-30T05:00:00Z")])),
+    });
+    const out = await collectSource(listing, deps(stores, fetch, { pause: () => Promise.resolve() }));
+    expect(out).toMatchObject({ undated: 3 });
+    expect(calls.filter((c) => c.includes("/news/"))).toHaveLength(MAX_ARTICLE_FETCHES_PER_RUN);
   });
 });

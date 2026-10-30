@@ -129,10 +129,11 @@ Sources are declared in a typed, version-controlled registry (`config/sources.ts
 Collector rules:
 
 - The collector refuses to fetch a source unless `termsReview.status === "approved"`, the review is less than 180 days old, and robots.txt permits the path.
-- At most one request per source per run, with conditional GET (`ETag`, `Last-Modified`), timeouts, and backoff on HTTP 429 and 503.
+- One request for each source's feed or page per run, with conditional GET (`ETag`, `Last-Modified`), timeouts, and backoff on HTTP 429 and 503. Listing pages add one request per new article (next rule).
 - The User-Agent identifies the bot and a contact, for example `ErodeGlitzBot/0.1 (+contact URL)`.
 - No login-walled or paywalled content. No social-media scraping of any kind.
 - Only metadata and a short excerpt (at most 500 characters) are stored. Full articles are never stored or republished.
+- Listing pages give no dates, so the collector opens each new article once (robots.txt permitting, at most 15 a run, 1.5 seconds apart) and reads only its publication time (`article:published_time` or JSON-LD `datePublished`). An article whose date cannot be read is not stored, so an old story on a listing page never passes as today's news. Coimbatore 360 also opens each article.
 
 ### 5.2 Normalisation
 

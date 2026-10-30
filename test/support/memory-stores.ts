@@ -107,6 +107,7 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
         items.set(stored.id, stored);
         return Promise.resolve({ inserted: true, item: clone(stored) } as const);
       },
+      isKnown: (sourceId, urlHash) => Promise.resolve([...items.values()].some((i) => i.sourceId === sourceId && i.urlHash === urlHash)),
       listUnassigned: (limit) =>
         Promise.resolve(
           [...items.values()]

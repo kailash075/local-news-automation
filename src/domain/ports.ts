@@ -61,6 +61,8 @@ export type StoryRelation = "primary" | "corroborating" | "contradicting";
 export type SourceItemStore = {
   /** Unique on (sourceId, urlHash). Returns the stored item only when it was new. */
   insertIfNew: (item: NewSourceItem) => Promise<{ inserted: true; item: SourceItem } | { inserted: false }>;
+  /** Whether (sourceId, urlHash) is already stored, so a collector can skip extra work for known links. */
+  isKnown: (sourceId: NewSourceItem["sourceId"], urlHash: NewSourceItem["urlHash"]) => Promise<boolean>;
   listUnassigned: (limit: number) => Promise<readonly SourceItem[]>;
   attachToStory: (itemId: SourceItemId, storyId: StoryId, relation: StoryRelation) => Promise<void>;
   listForStory: (storyId: StoryId) => Promise<readonly SourceItem[]>;

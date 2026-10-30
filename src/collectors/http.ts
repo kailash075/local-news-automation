@@ -12,7 +12,8 @@ export const BOT_VERSION = "0.1";
 export const userAgent = (contactUrl: string): string => `${BOT_NAME}/${BOT_VERSION} (+${contactUrl})`;
 
 export const DEFAULT_TIMEOUT_MS = 20_000;
-export const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+/** Dinamani's Erode page is about 2.3 MB of HTML (2026-10-30). */
+export const DEFAULT_MAX_BYTES = 6 * 1024 * 1024;
 
 export type HttpGetRequest = {
   url: string;

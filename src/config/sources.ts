@@ -7,8 +7,20 @@ import { SourceSchema, type Source } from "../domain/types.ts";
  *
  * Every external source starts with terms review "pending" and `enabled: false`: the collector refuses to fetch it
  * until the owner has reviewed its terms of use and robots.txt, recorded the review here, and verified the URL.
- * URLs below are the publishers' known pages; none of their feed or page formats has been verified yet.
+ *
+ * The newspapers follow the Coimbatore 360 source list (its district pages), Erode version. Its Google News and Bing News
+ * searches are left out: news.google.com's robots.txt disallows /rss/search for all bots, and Bing's news RSS allows only
+ * "personal, non-commercial use" (checked 2026-10-30).
  */
+
+/** Owner approval of the newspapers' Erode pages, 2026-10-30: discovery only, never AI input. */
+const NEWSPAPER_APPROVED = {
+  status: "approved",
+  reviewedBy: "kailash075",
+  reviewedAt: "2026-10-30T17:00:00.000Z",
+  allowedUse: "discovery_only",
+  llmInputAllowed: false,
+} as const;
 
 const PENDING = {
   status: "pending",
@@ -110,17 +122,87 @@ const RAW_SOURCES: readonly z.input<typeof SourceSchema>[] = [
     trustTier: "T2_established_publisher",
     erodeSpecific: true,
     termsReview: {
-      status: "pending",
-      allowedUse: "discovery_only",
-      llmInputAllowed: false,
+      ...NEWSPAPER_APPROVED,
       notes:
         "Owner-nominated, discovery only. Checked 2026-10-30: page returns HTTP 200; robots.txt does not disallow /news/ for " +
         "general crawlers but blocks GPTBot and names other AI crawlers (ChatGPT-User, Google-Extended, CCBot), so its text " +
-        "must never reach an AI model. Terms of use not reviewed. Article link pattern not set. Sitemaps (e.g. sitemap_cities.xml) " +
-        "may be a lighter alternative to the listing page.",
+        "must never reach an AI model. Only about 8 stories are plain links on the page; the rest sit in page data. " +
+        "Terms of use page not found on the home page.",
     },
+    linkPattern: String.raw`^((?:https://www\.dinamalar\.com)?/news/tamil-nadu-district-news-erode/(?:[a-z0-9-]+/\d{6,}|\d{6,}/[a-z0-9-]+))/?$`,
     fetchIntervalMinutes: 120,
-    enabled: false,
+    enabled: true,
+  },
+  {
+    id: "dinamani-erode",
+    name: "Dinamani, Erode (Coimbatore edition)",
+    kind: "listing_page",
+    url: "https://www.dinamani.com/all-editions/edition-coimbatore/erode",
+    trustTier: "T2_established_publisher",
+    erodeSpecific: true,
+    termsReview: {
+      ...NEWSPAPER_APPROVED,
+      notes:
+        "Discovery only. Checked 2026-10-30: HTTP 200, robots.txt allows the page, about 7 article links per load. " +
+        "Terms of use at https://www.dinamani.com/terms-of-use (not read in full).",
+    },
+    linkPattern: String.raw`^((?:https://www\.dinamani\.com)?/all-editions/edition-coimbatore/erode/\d{4}/[A-Za-z]{3}/\d{2}/[a-z0-9-]+)/?$`,
+    fetchIntervalMinutes: 120,
+    enabled: true,
+  },
+  {
+    id: "dinakaran-erode",
+    name: "Dinakaran, Erode district",
+    kind: "listing_page",
+    url: "https://www.dinakaran.com/district/erode/",
+    trustTier: "T2_established_publisher",
+    erodeSpecific: true,
+    termsReview: {
+      ...NEWSPAPER_APPROVED,
+      notes:
+        "Discovery only. Checked 2026-10-30: HTTP 200, robots.txt allows the page, about 9 article links " +
+        "(district/erode_DDMMYY_N). Terms of use page not found on the home page.",
+    },
+    linkPattern: String.raw`^((?:https://www\.dinakaran\.com)?/district/erode_\d{6}_\d+)/?$`,
+    fetchIntervalMinutes: 120,
+    enabled: true,
+  },
+  {
+    id: "polimer-erode",
+    name: "Polimer News, Erode tag",
+    kind: "rss",
+    url: "https://www.polimernews.com/rss/tags/erode",
+    trustTier: "T2_established_publisher",
+    erodeSpecific: false,
+    termsReview: {
+      ...NEWSPAPER_APPROVED,
+      notes:
+        "Discovery only. Checked 2026-10-30: RSS feed of the Erode tag, robots.txt allows it, 20 entries but few new ones " +
+        "(latest 18 Oct). Tagged stories can be about several districts, so the gazetteer check applies. Terms of use page " +
+        "not found on the home page.",
+    },
+    fetchIntervalMinutes: 240,
+    enabled: true,
+  },
+  {
+    id: "hindutamil-erode",
+    name: "Hindu Tamil Thisai, Erode topic",
+    kind: "listing_page",
+    url: "https://www.hindutamil.in/topic/erode",
+    trustTier: "T2_established_publisher",
+    erodeSpecific: false,
+    termsReview: {
+      ...NEWSPAPER_APPROVED,
+      notes:
+        "Discovery only. Checked 2026-10-30: HTTP 200, robots.txt allows the page, about 26 links, some of them older " +
+        "stories (August, September) and some from elsewhere, so the gazetteer and freshness checks apply. Section and " +
+        "supplement pages (/news/cinema/tamil-cinema, /news/supplements/uyir-moochi) are not articles and have no date; " +
+        "their names are one or two words, article names four or more, so the pattern leaves them out. Terms of use page " +
+        "not found on the home page.",
+    },
+    linkPattern: String.raw`^((?:https://www\.hindutamil\.in)?/news/[a-z-]+/[a-z0-9]+(?:-[a-z0-9]+){3,})/?$`,
+    fetchIntervalMinutes: 120,
+    enabled: true,
   },
   {
     id: "editor-tip",

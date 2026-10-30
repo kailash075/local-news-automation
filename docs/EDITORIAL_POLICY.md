@@ -65,11 +65,20 @@ The owner chose all four kinds for the first batch (2026-10-30): government anno
 - India Meteorological Department and Regional Meteorological Centre, Chennai
 - Press Information Bureau feeds (filtered for Erode)
 - Established Tamil and English publishers' Erode or Kongu-region feeds, if their terms allow automated access
-- **Dinamalar, Erode district news** (<https://www.dinamalar.com/news/tamil-nadu-district-news-erode>), nominated by the owner, discovery only. Checked 2026-10-30:
-  - The page loads (HTTP 200).
-  - robots.txt does not disallow `/news/` for general crawlers. It blocks OpenAI's GPTBot and also names other AI crawlers (ChatGPT-User, Google-Extended, CCBot), a clear signal against AI use. So its text must never be sent to an AI model.
-  - Its sitemaps (for example `sitemap_cities.xml`) may be a lighter way to find new Erode items than fetching listing pages.
-  - Its terms of use have **not** been reviewed yet. That review is required before the collector may fetch it.
+
+**Approved by the owner on 2026-10-30: five newspapers' Erode pages, discovery only.** They are the Erode version of the district pages Coimbatore 360 reads. For each, the page loads, robots.txt allows it, and its article pages give a publication time. The terms-of-use pages were not read in full (only Dinamani links one from its home page). The approval must be renewed within 180 days. None of their text may be sent to an AI model.
+
+| Source | Page |
+|---|---|
+| Dinamalar, Erode district news (owner-nominated) | <https://www.dinamalar.com/news/tamil-nadu-district-news-erode>. Its robots.txt blocks GPTBot and names other AI crawlers, a clear signal against AI use. |
+| Dinamani, Erode (Coimbatore edition) | <https://www.dinamani.com/all-editions/edition-coimbatore/erode> |
+| Dinakaran, Erode district | <https://www.dinakaran.com/district/erode/> |
+| Polimer News, Erode tag (RSS) | <https://www.polimernews.com/rss/tags/erode> |
+| Hindu Tamil Thisai, Erode topic | <https://www.hindutamil.in/topic/erode> |
+
+A newspaper report alone is V0. Two of these papers reporting the same event independently make it V1; a power-cut notice printed by several papers is the usual case.
+
+Not used, although Coimbatore 360 uses them: Google News search (news.google.com's robots.txt disallows `/rss/search` for all bots) and Bing News search (its RSS allows only "personal, non-commercial use"). Daily Thanthi and Maalaimalar have no Erode listing page that was found.
 
 ## 4. Verification levels
 

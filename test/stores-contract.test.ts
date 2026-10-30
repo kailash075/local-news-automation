@@ -85,8 +85,11 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
 
   describe("source items and stories", () => {
     it("insert each (source, url) once and keep optional fields absent", async () => {
-      const first = await s.sourceItems.insertIfNew(newSourceItem("a", h.clock.now()));
+      const a = newSourceItem("a", h.clock.now());
+      expect(await s.sourceItems.isKnown(a.sourceId, a.urlHash)).toBe(false);
+      const first = await s.sourceItems.insertIfNew(a);
       expect(first.inserted).toBe(true);
+      expect(await s.sourceItems.isKnown(a.sourceId, a.urlHash)).toBe(true);
       if (!first.inserted) return;
       expect(first.item).not.toHaveProperty("excerpt");
       expect(first.item).not.toHaveProperty("publishedAt");

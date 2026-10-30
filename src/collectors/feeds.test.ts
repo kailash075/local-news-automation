@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_EXCERPT_CHARS } from "../domain/types.ts";
-import { extractListingLinks, parseFeed, parseSitemap } from "./feeds.ts";
+import { extractListingLinks, extractPublishedTime, parseFeed, parseSitemap } from "./feeds.ts";
 
 const RSS = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -79,6 +79,27 @@ describe("parseSitemap", () => {
       { loc: "https://example.com/a", lastmod: new Date("2026-10-30T05:00:00Z") },
       { loc: "https://example.com/b", lastmod: new Date("2026-10-30T00:30:00Z"), title: "ஈரோடு செய்தி" },
     ]);
+  });
+});
+
+describe("extractPublishedTime", () => {
+  it("reads article:published_time in either attribute order (Dinakaran, Dinamani)", () => {
+    expect(extractPublishedTime('<meta property="article:published_time" content="2026-10-17T06:41:54+05:30">')).toEqual(
+      new Date("2026-10-17T01:11:54Z"),
+    );
+    expect(extractPublishedTime("<meta content='2026-10-29T19:02:11.546Z' property='article:published_time' />")).toEqual(
+      new Date("2026-10-29T19:02:11.546Z"),
+    );
+  });
+
+  it("falls back to JSON-LD datePublished (Dinamalar, Hindu Tamil)", () => {
+    const html = '<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-10-30T06:18:00+05:30"}</script>';
+    expect(extractPublishedTime(html)).toEqual(new Date("2026-10-30T00:48:00Z"));
+  });
+
+  it("returns nothing when the page has no readable date", () => {
+    expect(extractPublishedTime("<html><body>செய்தி</body></html>")).toBeUndefined();
+    expect(extractPublishedTime('<meta property="article:published_time" content="yesterday">')).toBeUndefined();
   });
 });
 
