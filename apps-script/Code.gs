@@ -1,8 +1,11 @@
+/** @OnlyCurrentDoc */
+// The line above limits this script to the one Sheet it is attached to (Google asks only for that Sheet).
+
 /**
  * ErodeGlitz Sheet bridge.
  *
  * A small web app, bound to the "ErodeGlitz Newsroom" Google Sheet, that the GitHub Actions jobs call to read and
- * write rows. Every request is a POST with a JSON body {key, op, ...}; the key must equal the Script property
+ * write rows. Every request is a POST with a JSON body {auth, op, ...}; `auth` must equal the Script property
  * BRIDGE_KEY. Writes run under the script lock, so "insert if absent", compare-and-set updates and publication
  * leases are atomic even when two workflows run at once.
  *
@@ -10,12 +13,13 @@
  * the `setup` operation, which the `migrate` workflow sends.
  *
  * Safety rules kept here, whatever the caller sends:
- *  - tables marked append-only (decisions, evidence, publish attempts, errors) refuse `update` and `upsert`;
+ *  - tables marked append-only (decisions, evidence, drafts, publish attempts, errors) refuse `update` and `upsert`;
  *  - nothing is ever deleted;
  *  - every written cell is plain text, and text that Sheets would read as a formula is stored literally;
  *  - secrets live in Script properties under the SECRET_ prefix and never in the Sheet.
  *
- * Setup: docs/SETUP_GUIDE.md, section "Google Sheet and Apps Script bridge".
+ * Setup: docs/SETUP_GUIDE.md, section "Google Sheet and Apps Script bridge". Only this file and the Script property
+ * BRIDGE_KEY are needed; the project's appsscript.json can stay as Google created it.
  */
 
 var MAX_CELL_CHARS = 45000;

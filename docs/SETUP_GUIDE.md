@@ -1,6 +1,6 @@
 # Setup Guide
 
-> **Status, 2026-10-30: nothing in this guide has been set up yet.** Each step is marked:
+> **Status, 2026-10-30: §4 (Google Sheet and Apps Script bridge) is done: the bridge is deployed, both GitHub secrets are set and the migrate run passed. Nothing else in this guide has been set up yet.** Each step is marked:
 >
 > - **[Manual]**: a person has to do it; the code cannot.
 > - **[Approval]**: creates an account, changes a setting, spends money, or can publish. The owner must explicitly approve it first.
@@ -81,7 +81,7 @@ Repository **secrets**:
 | Name | Phase | Value |
 |---|---|---|
 | `SHEET_BRIDGE_URL` | 1 | The Apps Script web app URL, ending in `/exec` (§4, step 6) |
-| `SHEET_BRIDGE_KEY` | 1 | The Script property `BRIDGE_KEY` (§4, step 5) |
+| `SHEET_BRIDGE_KEY` | 1 | The same value as the Script property `BRIDGE_KEY` (§4, steps 4 and 5) |
 | `CLOUDINARY_API_KEY` | 1 | Cloudinary dashboard (§5) |
 | `CLOUDINARY_API_SECRET` | 1 | Cloudinary dashboard (§5) |
 | `TOKEN_ENCRYPTION_KEY` | 1 | 32 random bytes, base64: `openssl rand -base64 32`. Keep an offline copy in your password manager; without it the stored Instagram token cannot be read. |
@@ -121,18 +121,17 @@ The jobs never touch the Sheet directly. A small Apps Script web app inside the 
 
 1. **Google account.** Sign in to Google as `erodeglitz@gmail.com`. Turn on two-factor authentication for this account first: the Sheet holds every editorial decision, and the bridge holds the encrypted Instagram token.
 2. **Sheet.** Create a blank Google Sheet named `ErodeGlitz Newsroom`. Do not share it with anyone. Leave it empty; the migrate workflow creates the tabs.
-3. **Bridge code.** In the Sheet, open **Extensions → Apps Script**. Name the project `ErodeGlitz bridge`.
-   - Replace everything in `Code.gs` with the contents of `apps-script/Code.gs` from this repository.
-   - Open **Project Settings** (gear icon), tick **Show "appsscript.json" manifest file in editor**, then replace `appsscript.json` with `apps-script/appsscript.json`. It limits the script to this one Sheet (`spreadsheets.currentonly`).
-   - Save.
-4. **Create the key.** In the editor, choose the function `initBridge` and click **Run**. Google asks for permission:
-   - It should ask only to "see, edit, create and delete only the specific Google Sheets document that this application is connected to". If it asks for more, stop and check that the manifest from step 3 was saved.
-   - Google shows "Google hasn't verified this app" because the script is yours, not a published app. Click **Advanced**, then **Go to ErodeGlitz bridge**.
-5. **Copy the key.** **Project Settings → Script Properties** now shows `BRIDGE_KEY`. Copy its value into the GitHub secret: `gh secret set SHEET_BRIDGE_KEY`. Do not paste it anywhere else.
-6. **Deploy.** **Deploy → New deployment**, type **Web app**:
+3. **Bridge code.** In the Sheet, open **Extensions → Apps Script**. A new tab opens with "Untitled project" and `Code.gs`.
+   - Click **Untitled project** and rename it `ErodeGlitz bridge`.
+   - Replace everything in `Code.gs` with the contents of `apps-script/Code.gs` from this repository (Ctrl+A, Ctrl+V), then save with Ctrl+S.
+   - Nothing else in the project needs changing. The first line of the code (`@OnlyCurrentDoc`) limits the script to this one Sheet.
+4. **Make the key.** In the VS Code terminal run `openssl rand -hex 32` and copy the 64 characters it prints. In Apps Script, open **Project Settings** (gear icon) → **Script Properties** → **Add script property**: Property `BRIDGE_KEY`, Value: paste. Click **Save script properties**. (Running the function `initBridge` once does the same with a key Google generates.)
+5. **Same key in GitHub.** Open <https://github.com/kailash075/local-news-automation/settings/secrets/actions> → **New repository secret**: Name `SHEET_BRIDGE_KEY`, Secret: paste the same 64 characters → **Add secret**. Do not paste the key anywhere else.
+6. **Deploy.** In Apps Script: **Deploy → New deployment** → click the gear next to "Select type" → **Web app**:
    - Execute as: **Me (erodeglitz@gmail.com)**.
-   - Who has access: **Anyone**. GitHub Actions cannot sign in to Google; the key from step 5 is what protects the bridge. Requests without the key get "unauthorized".
-   - Click **Deploy** and copy the **Web app URL** (it ends in `/exec`): `gh secret set SHEET_BRIDGE_URL`.
+   - Who has access: **Anyone**. The box starts at "Only myself", so change it. GitHub Actions cannot sign in to Google; the key from step 4 is what protects the bridge. Requests without the key get "unauthorized".
+   - Click **Deploy**. Google asks to **Authorize access**: choose `erodeglitz@gmail.com`; on "Google hasn't verified this app" click **Advanced → Go to ErodeGlitz bridge (unsafe)** (it is your own script). The permission should be only for "the specific Google Sheets spreadsheets that this application is installed in"; if it asks for Gmail, Drive or all spreadsheets, cancel and check the first line of `Code.gs`. Then **Allow**.
+   - Copy the **Web app URL** (it ends in `/exec`) into a second GitHub secret named `SHEET_BRIDGE_URL`, the same way as step 5.
 7. **Create the tabs.** Run **Actions → migrate**. The summary should list the created tabs and end with "Self test: all values came back unchanged." If the self test fails, do not run anything else; the summary shows which values Sheets changed.
 8. **After any change to `apps-script/Code.gs`.** Paste the new code, then **Deploy → Manage deployments → Edit (pencil) → Version: New version → Deploy**. Editing the existing deployment keeps the same URL. A new deployment would get a new URL.
 
@@ -224,7 +223,7 @@ No container is created and nothing is published by this check.
 
 - [ ] `pnpm install --frozen-lockfile`, typecheck, lint and test pass locally on Node 26 (passed on Node 22.23.2, 2026-10-30)
 - [ ] CI passes on GitHub
-- [ ] Sample Tamil graphics approved by the owner
+- [x] Sample Tamil graphics approved by the owner (2026-10-30)
 - [ ] Runner spike durations recorded in OPERATIONS.md
 
 ### Phase 1

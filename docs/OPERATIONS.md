@@ -169,7 +169,7 @@ This should not happen with a cap of 6 posts a day. Stop, check `content_publish
 
 1. Jobs fail closed, so nothing publishes. The job summary shows the bridge's answer.
 2. "unauthorized": `SHEET_BRIDGE_KEY` does not match the Script property `BRIDGE_KEY`. Copy it again ([setup guide §4](SETUP_GUIDE.md#4-google-sheet-and-apps-script-bridge-phase-1-approval), step 5).
-3. "did not answer with JSON": the web app URL is wrong, or the deployment is not open to "Anyone". Check **Deploy → Manage deployments** and `SHEET_BRIDGE_URL`.
+3. "did not answer with JSON": the web app URL is wrong, or the deployment is not open to "Anyone". With "(HTTP 401)" it is the access setting: **Deploy → Manage deployments → Edit (pencil)**, set Who has access to **Anyone**, Version **New version**, **Deploy**; the URL stays the same. Otherwise check `SHEET_BRIDGE_URL`.
 4. "busy" again and again: another request held the lock for 25 seconds. Look at the Apps Script **Executions** page for a stuck or slow call.
 5. "the Sheet layout is … but this code expects …": run **Actions → migrate**.
 6. If the Sheet itself was damaged: **File → Version history**, restore the last good version, then run **Actions → migrate**.

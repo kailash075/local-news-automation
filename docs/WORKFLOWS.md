@@ -1,6 +1,6 @@
 # Workflows: the Coimbatore 360 pattern, Erode version
 
-> **Status, 2026-10-30:** the workflow files and the code they run are written and tested locally. Nothing has been pushed, nothing runs on GitHub yet, and nothing can post: the Google Sheet, the Apps Script bridge, Cloudinary, the Meta app and the Instagram token do not exist yet, and every switch is off.
+> **Status, 2026-10-30:** the code is pushed and `ci` passes. The Google Sheet and the Apps Script bridge are set up, and **Actions → migrate** created the tabs and passed its self test. No other workflow has run, and nothing can post: Cloudinary, the Meta app and the Instagram token do not exist yet, and every switch is off.
 
 ErodeGlitz posts to the owner's existing Instagram account **@erodeglitz** (Creator account). No new Instagram account is created.
 

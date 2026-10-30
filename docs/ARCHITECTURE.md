@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status, 2026-10-30:** most of this design is implemented and tested locally (not pushed). Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `import-token.yml`, `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
+> **Status, 2026-10-30:** most of this design is implemented, tested and pushed; the Google Sheet and its bridge are live (migrate passed), nothing else runs yet. Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `import-token.yml`, `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
 > Where a detail depends on an external service, the document says what was checked and what still needs verification.
 
 ## 1. Design drivers
@@ -420,7 +420,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 
 ### Controls
 
-- Sheet: not shared with anyone; the Google account has two-factor authentication; the bridge's manifest limits it to this one Sheet (`spreadsheets.currentonly`); every request needs the key; the bridge never deletes rows and refuses changes to append-only tabs.
+- Sheet: not shared with anyone; the Google account has two-factor authentication; the bridge's `@OnlyCurrentDoc` annotation limits it to this one Sheet (`spreadsheets.currentonly`); every request needs the key; the bridge never deletes rows and refuses changes to append-only tabs.
 - Card images are public on Cloudinary at URLs that hold the image's SHA-256, so they cannot be guessed. The URLs appear only in the private review issue and in the request to Meta. Uploads are signed; there is no unsigned upload preset.
 - The token is sent in a header where Meta supports it (to be verified in Phase 2), never in a logged URL. A logger redaction list covers `access_token`, `Authorization`, `apikey`, `password` and secret names.
 - `GITHUB_TOKEN` permissions are declared per workflow. There are no `pull_request_target` workflows. Untrusted text reaches scripts only through environment variables.
@@ -442,7 +442,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 .github/ISSUE_TEMPLATE/ tip, incident
 assets/fonts/           OFL Tamil fonts and licence
 config/                 sources.ts, gazetteer.ts, sensitivity-rules.ts, hashtags.ts
-apps-script/            the Sheet bridge (Code.gs, appsscript.json), pasted into Apps Script by the owner
+apps-script/            the Sheet bridge (Code.gs), pasted into Apps Script by the owner
 src/
   domain/               types, schemas, state machines, verification and risk rules (pure, no I/O)
   config/               environment schema (Zod), fail-closed defaults

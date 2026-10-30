@@ -1,6 +1,6 @@
 # ErodeGlitz: Project Plan
 
-> **Status, 2026-10-30: Phase 0 code written and tested locally; not pushed.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, see [Workflows](docs/WORKFLOWS.md)) and 319 passing tests exist on this PC. No infrastructure, external accounts, credentials or posts exist yet, and nothing has run on GitHub.
+> **Status, 2026-10-30: Phase 0 code pushed; `ci` passes.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, see [Workflows](docs/WORKFLOWS.md)) and 319 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet and its Apps Script bridge are set up, and the migrate run created the tabs and passed its self test. Cloudinary, the Meta app, the Instagram token and every other external piece do not exist yet, no switch is on, and nothing has been posted.
 > Last updated: 2026-10-30. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
 
 ErodeGlitz is a Tamil-first Instagram page for local news from Erode city and Erode district, Tamil Nadu. This repository will hold an automated newsroom pipeline that:
@@ -220,7 +220,7 @@ Exit criteria: agreed quality bar met (for example, 90% "publishable with minor 
 ### Milestone checklist
 
 - [x] Owner decisions recorded (§8)
-- [ ] Phase 0 complete and graphics approved (code and local tests done 2026-10-30; push, CI, runner spike and graphics approval pending)
+- [ ] Phase 0 complete (code and local tests done, sample graphics approved by the owner 2026-10-30; push, CI and runner spike pending)
 - [x] Storage decided: Google Sheet with an Apps Script bridge, like Coimbatore 360 (2026-10-30; replaces the Supabase approval)
 - [ ] Sheet and bridge set up by the owner; `migrate` self test passes
 - [ ] Cloudinary account created by the owner (needs approval)
@@ -296,7 +296,7 @@ Still open: none.
 
 **Next engineering steps:**
 
-- Owner: look at the sample cards in `out/samples/` and confirm the Tamil text is correct.
+- Done 2026-10-30: the owner checked the sample cards in `out/samples/`; Tamil text and layout are correct.
 - Owner approval needed: commit and push this work to `master` as `kailash075`. The push starts `ci.yml` (a few Actions minutes). Scheduled workflows stay idle until the repository variables are set.
 - Runner spike: run `draft.yml`'s render job once on `ubuntu-slim` to see whether Chromium works there; record durations in [Operations §9](docs/OPERATIONS.md#9-cost-monitoring-and-budgets).
 - Still to write: `import-token.yml`, `maintenance.yml` (backup export, retention, daily digest), the editor-tip issue form, and a parser for structured power-cut notices so the template caption can be used.
