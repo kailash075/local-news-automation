@@ -1,4 +1,4 @@
-import { runDrafts, pendingDraftWork } from "../app/draft.ts";
+import { MAX_NEW_ISSUES_PER_RUN, runDrafts, pendingDraftWork } from "../app/draft.ts";
 import { runTriage } from "../app/triage.ts";
 import { createImagesFromEnv, missingForImages } from "../config/env.ts";
 import { sourceById } from "../config/sources.ts";
@@ -44,7 +44,8 @@ await runJob(
           `### draft`,
           `Items triaged: ${triage.items} (new stories ${triage.newStories}, joined existing ${triage.attached}, discarded ${triage.discarded})`,
           ...triage.lines,
-          `Revisions rendered: ${report.revisions}. Issues created: ${report.issuesCreated}, updated: ${report.issuesUpdated}.`,
+          `Revisions rendered: ${report.revisions}. Issues created: ${report.issuesCreated}, updated: ${report.issuesUpdated}.` +
+            (report.deferred === 0 ? "" : ` ${report.deferred} more stories wait for the next run (at most ${MAX_NEW_ISSUES_PER_RUN} new issues a run).`),
           ...report.problems.map((p) => `- problem: ${p}`),
         ].join("\n"),
       );

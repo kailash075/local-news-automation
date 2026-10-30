@@ -168,20 +168,36 @@ const buildRevision = async (
   return { ok: true, draft };
 };
 
-export type DraftReport = { revisions: number; issuesCreated: number; issuesUpdated: number; problems: readonly string[] };
+/** New review issues per run, so a busy day (or the first run) does not flood the editor. The rest wait for the next run. */
+export const MAX_NEW_ISSUES_PER_RUN = 10;
+
+export type DraftReport = {
+  revisions: number;
+  issuesCreated: number;
+  issuesUpdated: number;
+  /** Stories still without a review issue because this run reached MAX_NEW_ISSUES_PER_RUN. */
+  deferred: number;
+  problems: readonly string[];
+};
 
 export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string): Promise<DraftReport> => {
-  const report = { revisions: 0, issuesCreated: 0, issuesUpdated: 0, problems: [] as string[] };
+  const report = { revisions: 0, issuesCreated: 0, issuesUpdated: 0, deferred: 0, problems: [] as string[] };
   const stories = (await deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100)).filter(
     (s) => onlyStoryId === undefined || s.id === onlyStoryId,
   );
 
-  for (const initial of stories.sort((a, b) => b.priority - a.priority)) {
+  // Highest priority first (power cuts lead), then the newest.
+  const order = (a: Story, b: Story): number => b.priority - a.priority || Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt);
+  for (const initial of stories.sort(order)) {
     let story = initial;
+    let issueNumber = await deps.stores.reviewThreads.getIssueNumber(story.id);
+    if (issueNumber === undefined && onlyStoryId === undefined && report.issuesCreated >= MAX_NEW_ISSUES_PER_RUN) {
+      report.deferred += 1;
+      continue;
+    }
     const decisions = await deps.stores.decisions.listFor(story.id);
     const items = await deps.stores.sourceItems.listForStory(story.id);
     let draft = await deps.stores.drafts.latestFor(story.id);
-    let issueNumber = await deps.stores.reviewThreads.getIssueNumber(story.id);
     let changed = issueNumber === undefined || onlyStoryId !== undefined;
 
     const request = captionRequest(decisions);
