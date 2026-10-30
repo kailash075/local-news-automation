@@ -100,7 +100,12 @@ export const EnvSchema = z.object({
 
 export type Env = z.output<typeof EnvSchema>;
 
-export const loadEnv = (source: NodeJS.ProcessEnv = process.env): Env => EnvSchema.parse(source);
+/**
+ * GitHub Actions passes a repository variable that is not set (`${{ vars.X }}`) as an empty string, so empty and
+ * blank values count as "not set": defaults apply and switches stay off.
+ */
+export const loadEnv = (source: NodeJS.ProcessEnv = process.env): Env =>
+  EnvSchema.parse(Object.fromEntries(Object.entries(source).filter(([, v]) => v !== undefined && v.trim() !== "")));
 
 /** What is missing before a job that needs the Google Sheet can run. Empty means ready. */
 export const missingForSheet = (env: Env): readonly string[] => [
