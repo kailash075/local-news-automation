@@ -1,0 +1,33 @@
+name: status
+# Coimbatore 360 "ig_probe.yml", Erode version: a read-only health report in the run summary (switches, queue, last posts,
+# token expiry, and Instagram's live content_publishing_limit when a token exists).
+on:
+  schedule:
+    - cron: "13 7 * * *"
+      timezone: "Asia/Kolkata"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: status
+  cancel-in-progress: true
+jobs:
+  status:
+    if: github.event_name != 'schedule' || vars.COLLECTING_ENABLED == 'true' || vars.PUBLISHING_ENABLED == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Status
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
+          COLLECTING_ENABLED: ${{ vars.COLLECTING_ENABLED }}
+          DRY_RUN: ${{ vars.DRY_RUN }}
+          IG_GRAPH_VERSION: ${{ vars.IG_GRAPH_VERSION }}
+        run: pnpm run job:status

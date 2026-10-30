@@ -1,0 +1,45 @@
+name: review-command
+# The editor's desk. No Coimbatore 360 equivalent: there, every story posts automatically. Here an editor approves the exact
+# revision on the story's issue (/approve <rev>, /approve-sensitive <rev> for crime, deaths, politics and other sensitive
+# stories, /attest, /hold, /reject, /caption, /killswitch ...). Only comments that start with "/" start a runner.
+# The comment text reaches the parser through an environment variable and is never pasted into a shell command.
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  issues: write
+  actions: write # starts draft.yml after a new revision and publish.yml after an approval
+concurrency:
+  group: review-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  command:
+    if: >-
+      startsWith(github.event.comment.body, '/') &&
+      github.event.issue.pull_request == null &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Handle command
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          EDITOR_GITHUB_LOGINS: ${{ vars.EDITOR_GITHUB_LOGINS }}
+          OWNER_GITHUB_LOGIN: ${{ vars.OWNER_GITHUB_LOGIN }}
+          APPROVAL_TTL_HOURS: ${{ vars.APPROVAL_TTL_HOURS }}
+          POSTING_WINDOW_IST: ${{ vars.POSTING_WINDOW_IST }}
+          PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
+          PUBLISH_ON_APPROVAL: ${{ vars.PUBLISH_ON_APPROVAL }}
+        run: pnpm run job:review-command

@@ -51,7 +51,7 @@ Targets: R0 notices reviewed within 2 hours during the posting window, so the in
 
 Use **any one** of these. Each is enough on its own.
 
-1. **From a phone:** comment `/killswitch on <reason>` on any issue. Any editor can do this. It sets the database flag that the publisher reads immediately before each Instagram call.
+1. **From a phone:** comment `/killswitch on <reason>` on any issue. Any editor can do this. It sets the Sheet switch (`settings` tab) that the publisher reads immediately before each Instagram call.
 2. **Repository variable:** GitHub, then Settings, then Secrets and variables, then Actions, then Variables: set `PUBLISHING_ENABLED` to `false`. Or from a terminal:
 
    ```bash
@@ -104,7 +104,7 @@ Alerts are GitHub issues labelled `ops-alert`, with one open issue per alert key
 | `quota-low` | Live publishing quota nearly used | Runbook 6.F |
 | `pipeline-stale` | No successful pipeline run for 6 hours | Runbook 6.J |
 | `review-backlog` | More than 10 stories waiting over 6 hours | Triage: reject or hold low-value items |
-| `db-near-limit` | Database over 70% of 500 MB, or storage over 70% of 1 GB | Runbook 6.I |
+| `sheet-near-limit` | Sheet over 70% of 10 million cells, or Cloudinary over 70% of its Free plan | Runbook 6.I |
 | `llm-budget` | Over 80% of the monthly LLM budget (Phase 3) | Runbook 6.K |
 | `actions-budget` | GitHub's 90% usage email (arrives by email, not as an issue) | Runbook 6.J |
 
@@ -145,7 +145,7 @@ Open an issue labelled `incident` for every incident, and record the timeline an
 
 1. Publishing has stopped (automatic trip).
 2. If the token can still be refreshed (less than 60 days old and not revoked), run `token-refresh.yml`.
-3. Otherwise generate a new token in the Meta dashboard and import it ([setup guide §5.3](SETUP_GUIDE.md#53-token-manual-approval)).
+3. Otherwise generate a new token in the Meta dashboard and import it ([setup guide §5.3](SETUP_GUIDE.md#63-token-manual-approval)).
 4. Run `job:ig-check`, then resume (§4).
 
 ### 6.E Instagram restriction or spam flag (4 / 2207051, 25 / 2207050)
@@ -165,15 +165,18 @@ This should not happen with a cap of 6 posts a day. Stop, check `content_publish
 2. If the terms or robots.txt no longer permit our use, set the source's terms status to `rejected` in the registry. Never work around a block.
 3. Update the adapter or URL through a pull request; review the terms again if the site changed significantly.
 
-### 6.H Database paused or unreachable
+### 6.H Sheet or bridge unreachable
 
-1. Jobs fail closed, so nothing publishes.
-2. A paused Supabase Free project can be restored from the Supabase dashboard. Official documentation gives a 90-day window to restore.
-3. If the data is lost, restore from the latest backup (§7) into a new project, update `DATABASE_URL`, run migrations, then run `pipeline.yml` by hand.
+1. Jobs fail closed, so nothing publishes. The job summary shows the bridge's answer.
+2. "unauthorized": `SHEET_BRIDGE_KEY` does not match the Script property `BRIDGE_KEY`. Copy it again ([setup guide §4](SETUP_GUIDE.md#4-google-sheet-and-apps-script-bridge-phase-1-approval), step 5).
+3. "did not answer with JSON": the web app URL is wrong, or the deployment is not open to "Anyone". Check **Deploy → Manage deployments** and `SHEET_BRIDGE_URL`.
+4. "busy" again and again: another request held the lock for 25 seconds. Look at the Apps Script **Executions** page for a stuck or slow call.
+5. "the Sheet layout is … but this code expects …": run **Actions → migrate**.
+6. If the Sheet itself was damaged: **File → Version history**, restore the last good version, then run **Actions → migrate**.
 
-### 6.I Database or storage near the Free limit
+### 6.I Sheet or Cloudinary near the limit
 
-Run the retention job by hand; check for runaway tables (`job_runs`, `errors`); shorten retention windows; delete unpublished renders. Upgrading the plan costs money and needs the owner's approval.
+Archive old rows of `job_runs`, `errors` and `publish_attempts` into a copy of the Sheet (a retention job is still to write); delete renders of rejected stories in Cloudinary. A paid plan costs money and needs the owner's approval.
 
 ### 6.J Actions not running, or budget used up
 
@@ -189,30 +192,25 @@ Captions fall back to manual automatically. Nothing else is affected. Raising th
 ### 6.L Secret leak suspected
 
 1. `/killswitch on secret-leak`.
-2. Rotate the affected secret at its source: Supabase password or key, Instagram token (remove app access, generate a new one), Anthropic key, or encryption keys (§8).
+2. Rotate the affected secret at its source: the bridge key (delete `BRIDGE_KEY` in Script properties, run `initBridge`, update `SHEET_BRIDGE_KEY`), the Google account password, the Cloudinary API secret, the Instagram token (remove app access, generate a new one), the Anthropic key, or the encryption key (§8).
 3. Update the GitHub secret; check the provider's logs for misuse.
 4. If the secret was ever committed, treat it as public forever. Rotating it is the fix; rewriting git history is not enough.
 
 ## 7. Backups and restore
 
-- **Weekly** (Sundays, inside `maintenance.yml`): every `newsroom` table is exported as JSON Lines, compressed, encrypted with AES-256-GCM using `BACKUP_ENCRYPTION_KEY`, and uploaded as a workflow artifact `backup-YYYY-MM-DD` with 90-day retention. Expected size is well under 10 MB. GitHub Free includes 500 MB of artifact storage. The export records the schema version. The `secrets` table is exported as ciphertext only.
-- **Monthly** (owner): download the latest backup and keep it offline:
-
-  ```bash
-  gh run list --workflow maintenance.yml --repo kailash075/local-news-automation
-  gh run download <run-id> -n backup-YYYY-MM-DD --repo kailash075/local-news-automation
-  ```
-
-- **Restore:** `pnpm run ops:restore -- --file <path>` into an empty database at the same migration version (Phase 1 tool).
-- **Quarterly:** test a restore into a scratch database and record the result.
+- **Always on:** Google keeps the Sheet's version history (**File → Version history → See version history**). A bad edit or a damaged tab can be rolled back from there.
+- **Weekly** (owner, until an automatic job exists): **File → Download → Microsoft Excel (.xlsx)** and keep the file offline. The Instagram token is not in the Sheet, so the download holds no credentials.
+- **Restore:** open the downloaded file, copy the tabs back into the `ErodeGlitz Newsroom` Sheet (or a new Sheet with the bridge set up again), then run **Actions → migrate** so the layout check and self test pass.
+- **Quarterly:** open the latest download and check that every tab is there.
 - Rendered images are not backed up; they can be regenerated from drafts.
-- Without `BACKUP_ENCRYPTION_KEY` the backups cannot be read. Keep a copy in a password manager.
+- Keep an offline copy of `TOKEN_ENCRYPTION_KEY` in a password manager; without it the stored Instagram token cannot be read and a new token must be generated.
+- An automatic export (`maintenance.yml`) is not written yet.
 
 ## 8. Token lifecycle
 
 | Event | Action |
 |---|---|
-| Initial import | [Setup guide §5.3](SETUP_GUIDE.md#53-token-manual-approval) |
+| Initial import | [Setup guide §5.3](SETUP_GUIDE.md#63-token-manual-approval) |
 | Weekly | `token-refresh.yml` refreshes (the token must be at least 24 hours old and unexpired) and stores the new expiry |
 | Under 14 days left | `token-expiring` alert |
 | Expired, or refresh impossible | Generate a new token in the dashboard and re-import it |
@@ -225,7 +223,7 @@ Captions fall back to manual automatically. Nothing else is affected. Raising th
 
 GitHub Free includes **USD 12 per month** of Actions compute for private repositories. Linux 2-core runners cost USD 0.006 per minute and `ubuntu-slim` (1 vCPU) costs USD 0.002 per minute. Without a payment method, usage is **blocked** when the allowance runs out; GitHub emails at 90% and 100%.
 
-Planning estimate, to be replaced with measurements. It assumes whole billed minutes per job (GitHub has historically rounded each job up to the next minute; confirm on the billing page).
+Planning estimate, to be replaced with measurements. **Superseded:** the workflows now follow the Coimbatore 360 split (collect, draft, publish); the current estimate, about USD 6.70 a month, is in [Workflows §5](WORKFLOWS.md#5-schedules-and-cost). The table below is the original single-pipeline estimate. It assumes whole billed minutes per job (GitHub has historically rounded each job up to the next minute; confirm on the billing page).
 
 | Workflow | Runs per month | Billed minutes per run | `ubuntu-slim` cost | `ubuntu-latest` cost |
 |---|---|---|---|---|
@@ -239,9 +237,9 @@ Planning estimate, to be replaced with measurements. It assumes whole billed min
 
 Conclusion: the schedule above fits only if most jobs run on `ubuntu-slim`. If the Phase 0 spike shows they cannot, run `pipeline.yml` every 2 hours and publish only from the pipeline run (no separate dispatch) until measurements say otherwise.
 
-### Supabase Free
+### Google Sheet and Cloudinary
 
-500 MB database, 1 GB file storage, 5 GB egress. Check the usage page monthly; the `db-near-limit` alert fires at 70%.
+The Sheet holds up to 10 million cells; at this volume that is many years. Apps Script and Sheets are free for this use. Cloudinary's Free plan limits are on its pricing page; check its usage page monthly.
 
 ### Claude API (Phase 3, optional)
 
@@ -258,7 +256,7 @@ Prompt caching of the fixed system prompt lowers input cost further. Which model
 ### Monthly cost review
 
 - [ ] GitHub billing: Actions usage this cycle
-- [ ] Supabase usage: database size, storage, egress
+- [ ] Sheet size (rows in `source_items`, `job_runs`, `errors`) and Cloudinary usage
 - [ ] `llm_usage` total compared with the Console (Phase 3)
 - [ ] Any new paid service? It must have the owner's written approval.
 
@@ -268,21 +266,23 @@ Prompt caching of the fixed system prompt lowers input cost further. Which model
 |---|---|---|
 | Source item excerpts | 90 days | Excerpt removed; URL hash and MinHash kept 1 year for de-duplication |
 | Discarded or rejected stories and their drafts | 90 days | Deleted; editorial decisions kept |
-| Unpublished renders (storage) | 30 days | Deleted |
-| Published renders (storage) | 1 year | Deleted (the post remains on Instagram) |
+| Unpublished renders (Cloudinary) | 30 days | Deleted |
+| Published renders (Cloudinary) | 1 year | Deleted (the post remains on Instagram) |
 | Published drafts, publications, publish attempts, editorial decisions | At least 2 years | Review with counsel |
 | `job_runs`, `errors` | 180 days | Deleted |
 | `llm_usage` | 2 years | Deleted |
-| Backup artifacts | 90 days (rolling) | Expire automatically; owner keeps monthly offline copies |
+| Weekly `.xlsx` downloads of the Sheet | Owner keeps them offline | Delete copies older than 2 years |
 
 A `legal_hold` flag on a story suspends deletion of everything related to it, for example after a complaint or legal notice.
+
+The Sheet bridge never deletes rows, so until a retention job is written these periods are applied by hand: move old rows into an archive copy of the Sheet, then delete them from the working Sheet while no job is running.
 
 ## 11. Release and change management
 
 - Every change goes through a pull request with green CI. Use branch protection if the plan supports it for private repositories.
 - **Merging to `master` deploys.** Scheduled workflows run the latest commit on the default branch at their next trigger.
-- **Risky changes** (publisher, gates, migrations): set `PUBLISHING_ENABLED=false`, merge, run `pipeline.yml` by hand in dry-run mode, check the results, then switch publishing back on.
-- **Database migrations:** reviewed SQL, backward-compatible (expand, then contract), applied by the manual `migrate.yml` workflow. Jobs check the schema version and refuse to run on a mismatch.
+- **Risky changes** (publisher, gates, Sheet layout): set `PUBLISHING_ENABLED=false`, merge, run `pipeline.yml` by hand in dry-run mode, check the results, then switch publishing back on.
+- **Sheet layout changes:** add columns only (never rename or remove), in `src/sheet/tables.ts`, then run the manual `migrate.yml` workflow. Jobs check the layout version and refuse to run on a mismatch. After a change to `apps-script/Code.gs`, deploy a new version of the existing web app ([setup guide §4](SETUP_GUIDE.md#4-google-sheet-and-apps-script-bridge-phase-1-approval), step 8).
 - **Dependencies:** Dependabot pull requests are reviewed like any other change; lockfile only, never floating versions.
 
 ### Phase 2 go-live checklist (first real post)
@@ -305,7 +305,7 @@ A `legal_hold` flag on a story suspends deletion of everything related to it, fo
 | Daily | Digest issue: collected, discarded, in review, approved, published, failures, alerts |
 | Weekly | Sample duplicates and relevance misses; corrections log; rejected-to-approved ratio; token expiry; alerts closed |
 | Monthly | Costs (§9); source terms reviews due within 30 days; retention ran; backup downloaded |
-| Quarterly | Re-check Meta documentation and the Graph API version ([compliance §13](INSTAGRAM_COMPLIANCE.md#13-go-live-compliance-checklist-phase-2)); GitHub terms and plan limits; Supabase limits; legal changes; restore test; due key rotations |
+| Quarterly | Re-check Meta documentation and the Graph API version ([compliance §13](INSTAGRAM_COMPLIANCE.md#13-go-live-compliance-checklist-phase-2)); GitHub terms and plan limits; Cloudinary and Google Apps Script limits; legal changes; restore test; due key rotations |
 
 ## 13. Contingency: moving off GitHub Actions
 

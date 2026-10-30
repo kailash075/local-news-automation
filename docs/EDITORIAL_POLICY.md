@@ -187,11 +187,11 @@ Editors are responsible for every word published, whoever or whatever drafted it
 - **Material factual error:** edit the caption in the Instagram app with a `திருத்தம்:` note explaining what changed, and publish a correction post if the error was widely seen.
 - **Minor error** (spelling, formatting): edit the caption; no note needed.
 - Target: act within 2 hours of discovery during the posting window.
-- Every correction is logged in the database and reviewed weekly.
+- Every correction is logged in the Sheet and reviewed weekly.
 
 ## 11. Complaints and grievances
 
-- A complaints contact (email or form) is published in the bio and policy page before launch.
+- Complaints and corrections contact: **erodeglitz@gmail.com**, published in the Instagram bio and on the policy page before launch.
 - Acknowledge complaints within 48 hours. Record each one with the decision and action taken.
 - Requests from people named in stories (for example, for removal or correction) are reviewed by the owner.
 - Whether formal grievance-redressal obligations for digital news publishers (IT Rules 2021) apply to ErodeGlitz is a question for legal counsel.

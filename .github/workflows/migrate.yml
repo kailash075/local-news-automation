@@ -1,0 +1,25 @@
+name: migrate
+# Creates the Google Sheet's tabs and columns from src/sheet/tables.ts (never removes any), records the layout version,
+# and checks that Sheets keeps text exactly (formulas, leading zeros, dates). Run once after setup and after every change
+# to the table layout; the other jobs refuse to run until the layout matches. Manual only.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: migrate
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Migrate
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+        run: pnpm run job:migrate

@@ -71,7 +71,7 @@ How the project applies this is described in [Architecture §5.10](ARCHITECTURE.
 | Aspect ratio | 4:5 to 1.91:1 | 4:5 (1080×1350) |
 | Width | 320 to 1440 px (scaled outside that range) | 1080 px |
 | Colour space | sRGB (others are converted) | sRGB |
-| Image URL | Must be publicly reachable when the container is created; US-ASCII URLs are safest | Signed, ASCII-only URLs valid for 6 h |
+| Image URL | Must be publicly reachable when the container is created; US-ASCII URLs are safest | Public, ASCII-only Cloudinary URL whose name is the image's SHA-256 (cannot be guessed) |
 | Carousel size | **Conflicting:** the guide says up to 20 items; error 2207028 says 2 to 10 | Not used until Phase 4; verify first |
 | API calls | "Calls within 24 hours = 4800 * Number of Impressions", per app and user pair | A handful of calls per post; a new account with few impressions has a low ceiling, so avoid unnecessary calls |
 
@@ -79,7 +79,7 @@ How the project applies this is described in [Architecture §5.10](ARCHITECTURE.
 
 | Fact (official) | Project handling |
 |---|---|
-| Dashboard-generated tokens are long-lived, valid 60 days | Imported once from a temporary GitHub secret, then stored encrypted (AES-256-GCM) in the database |
+| Dashboard-generated tokens are long-lived, valid 60 days | Imported once from a temporary GitHub secret, then stored encrypted (AES-256-GCM) in the Sheet bridge's Script properties, never in a Sheet tab |
 | Refresh: `GET https://graph.instagram.com/refresh_access_token` with `grant_type=ig_refresh_token`; the token must be at least 24 h old and unexpired, with `instagram_business_basic` granted | Weekly refresh job; alert below 14 days of remaining validity |
 | A token not refreshed within 60 days expires and cannot be refreshed | Runbook: generate a new token in the dashboard and re-import it ([Operations §8](OPERATIONS.md#8-token-lifecycle)) |
 | Long-lived token exchange "must be made in server-side code" | Never handled in a browser |
@@ -145,7 +145,7 @@ At most `MAX_POSTS_PER_DAY` posts, at least `MIN_MINUTES_BETWEEN_POSTS` apart, o
 
 ## 13. Go-live compliance checklist (Phase 2)
 
-- [ ] Account is professional; two-factor authentication is on for Instagram and Meta
+- [ ] Account is professional; two-factor authentication is on for Instagram and Meta (Instagram: Creator account with two-factor on since 2026-10-30; Meta developer account still to do)
 - [ ] App type is Business; only `instagram_business_basic` and `instagram_business_content_publish` granted
 - [ ] No Advanced Access requested
 - [ ] Privacy policy page live on GitHub Pages (public `erodeglitz-site` repository) and set in App Settings

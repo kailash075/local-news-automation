@@ -1,0 +1,33 @@
+name: Setup
+description: Node from .node-version, pnpm from package.json, frozen-lockfile install (no install scripts run).
+inputs:
+  browser:
+    description: "Also install the Chromium headless shell for rendering (true/false)"
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .node-version
+        cache: pnpm
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile
+    - name: Browser cache
+      if: inputs.browser == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: pw-headless-shell-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+    - name: Chromium headless shell
+      if: inputs.browser == 'true'
+      shell: bash
+      run: |
+        pnpm exec playwright-core install chromium-headless-shell
+        # Coimbatore 360 lesson: only pull system packages when the browser cannot start, because apt can hang for many minutes.
+        if ! node -e 'import("playwright-core").then(async ({chromium}) => { const b = await chromium.launch(); await b.close(); })'; then
+          echo "browser needs system libraries - installing them"
+          timeout 600 pnpm exec playwright-core install-deps chromium-headless-shell
+        fi

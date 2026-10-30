@@ -1,0 +1,67 @@
+name: draft
+# Coimbatore 360 "write_stories.yml", Erode version: cluster new items into stories, classify topic and risk, drop stale or
+# non-Erode stories, render a text-only Tamil card (no photos, no AI images), store it in the private bucket, and open or
+# update one review issue per story. Nothing is published here: every post waits for an editor's approval on its issue.
+# Started by collect.yml and by review-command.yml (after /caption or /headline); the schedule is only a safety net,
+# because GitHub sometimes skips scheduled runs. Like Coimbatore 360's post.yml, a cheap "check" job runs first and the
+# Chromium job starts only when there is something to draft.
+on:
+  schedule:
+    - cron: "37 7-19/4 * * *"
+      timezone: "Asia/Kolkata"
+  workflow_dispatch:
+    inputs:
+      story_id:
+        description: "Optional: redraft only this story"
+        default: ""
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: draft
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.event_name != 'schedule' || vars.COLLECTING_ENABLED == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    outputs:
+      pending: ${{ steps.check.outputs.pending }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Anything to draft?
+        id: check
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          DRAFT_MODE: check
+          STORY_ID: ${{ inputs.story_id }}
+          MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
+        run: pnpm run job:draft
+  draft:
+    needs: check
+    if: needs.check.outputs.pending != '' && needs.check.outputs.pending != '0'
+    runs-on: ubuntu-latest # ubuntu-slim once the Phase 0 runner spike shows Chromium works there
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          browser: "true"
+      - name: Draft and sync review issues
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          CLOUDINARY_CLOUD_NAME: ${{ vars.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          GH_TOKEN: ${{ github.token }}
+          STORY_ID: ${{ inputs.story_id }}
+          MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
+          EDITOR_GITHUB_LOGINS: ${{ vars.EDITOR_GITHUB_LOGINS }}
+        run: pnpm run job:draft

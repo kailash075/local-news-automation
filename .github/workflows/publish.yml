@@ -1,0 +1,50 @@
+name: publish
+# Coimbatore 360 "post.yml", Erode version. Publishes at most one approved story per run through the official Instagram API
+# (graph.instagram.com): create container -> wait for FINISHED -> media_publish. Every gate is checked again right before
+# media_publish. Three switches must all be on: repository variable PUBLISHING_ENABLED == "true", the Sheet switch
+# (Actions -> switch, or /killswitch on an issue), and DRY_RUN == "false". A manual run is a dry run unless you untick it.
+# Cadence: at most 6 posts a day, 08:00-21:00 IST, 30 minutes apart (owner decision). The 2-hourly schedule only catches up
+# on /schedule'd or spacing-delayed stories; approvals start this workflow directly when PUBLISH_ON_APPROVAL is "true".
+on:
+  schedule:
+    - cron: "47 8-20/2 * * *"
+      timezone: "Asia/Kolkata"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Test only: check every gate and report, never call Instagram's write endpoints"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+  issues: write # result comment on the story's issue
+concurrency:
+  group: publisher
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: vars.PUBLISHING_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-slim
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Publish one due story
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          CLOUDINARY_CLOUD_NAME: ${{ vars.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || vars.DRY_RUN }}
+          POSTING_WINDOW_IST: ${{ vars.POSTING_WINDOW_IST }}
+          MAX_POSTS_PER_DAY: ${{ vars.MAX_POSTS_PER_DAY }}
+          MIN_MINUTES_BETWEEN_POSTS: ${{ vars.MIN_MINUTES_BETWEEN_POSTS }}
+          APPROVAL_TTL_HOURS: ${{ vars.APPROVAL_TTL_HOURS }}
+          IG_GRAPH_VERSION: ${{ vars.IG_GRAPH_VERSION }}
+        run: pnpm run job:publish

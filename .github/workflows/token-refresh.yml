@@ -1,0 +1,31 @@
+name: token-refresh
+# Coimbatore 360 refreshes its token weekly from Apps Script; here a weekly job refreshes the 60-day Instagram token through
+# the official refresh_access_token endpoint and stores it encrypted in the Sheet bridge's Script properties. It fails loudly (GitHub e-mails the
+# owner) when the token cannot be refreshed or has fewer than 14 days left.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+      timezone: "Asia/Kolkata"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: token
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.event_name != 'schedule' || vars.PUBLISHING_ENABLED == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Refresh token
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          IG_GRAPH_VERSION: ${{ vars.IG_GRAPH_VERSION }}
+        run: pnpm run job:token-refresh

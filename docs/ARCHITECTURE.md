@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status: proposed design, 2026-10-29. Nothing in this document is implemented yet.**
+> **Status, 2026-10-30:** most of this design is implemented and tested locally (not pushed). Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `import-token.yml`, `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
 > Where a detail depends on an external service, the document says what was checked and what still needs verification.
 
 ## 1. Design drivers
@@ -9,7 +9,7 @@
 - **No always-on servers.** Work runs as short jobs on GitHub-hosted runners. No inbound endpoints (no webhooks) are exposed, which keeps the attack surface small.
 - **Low cost.** Free tiers only until the owner approves otherwise. Each paid component sits behind an interface and is optional.
 - **Portability.** All business logic lives in `src/` and runs through plain commands (`pnpm run job:<name>`). GitHub Actions only schedules and triggers them, so a different scheduler can replace it without code changes (see risk R1 in the [project plan](../PROJECT_PLAN.md#7-risks-and-mitigations)).
-- **Auditability.** Every source, decision, approval and API call is recorded in Postgres.
+- **Auditability.** Every source, decision, approval and API call is recorded in the `ErodeGlitz Newsroom` Google Sheet.
 
 ## 2. System context
 
@@ -27,8 +27,8 @@ flowchart LR
     R["Sync review issues"]
     PUB["Publisher"]
   end
-  DB[("Postgres (Supabase)")]
-  OBJ[("Private object storage (Supabase Storage)")]
+  DB[("Google Sheet, through the Apps Script bridge")]
+  OBJ[("Card images (Cloudinary)")]
   GHI["GitHub Issues review desk"]
   IG["Instagram API (graph.instagram.com)"]
   LLM["Claude API (Phase 3, optional)"]
@@ -46,7 +46,7 @@ flowchart LR
   ED <--> GHI
   GHI -- "slash commands" --> PUB
   PUB --> DB
-  PUB -- "create container with signed image URL" --> IG
+  PUB -- "create container with the card's public URL" --> IG
   IG -- "fetches the JPEG" --> OBJ
 ```
 
@@ -54,18 +54,23 @@ Editors can also submit tips by opening an issue from a template; a tip enters t
 
 ## 3. Execution model
 
-All workflows call `pnpm run job:<name>`. Proposed workflows:
+All workflows call `pnpm run job:<name>`. The split into collect, draft and publish follows the Coimbatore 360 pattern the owner asked for (2026-10-30); [Workflows](WORKFLOWS.md) explains what was adopted from it and what was deliberately changed, with schedules and costs.
 
-| Workflow | Trigger | Target runner | What it does | Concurrency group |
+| Workflow | Trigger | Runner | What it does | Concurrency group |
 |---|---|---|---|---|
-| `ci.yml` | push, pull request | `ubuntu-latest` | Frozen-lockfile install, typecheck, lint, test | per ref, cancel in progress |
-| `pipeline.yml` | schedule, hourly at minute 23 from 06:23 to 22:23 IST; manual | `ubuntu-slim` if the Phase 0 spike passes, otherwise `ubuntu-latest` | Collect, normalise, dedupe, triage, draft and render, sync review issues, then publish due items | `pipeline`, no cancel |
-| `review-command.yml` | `issue_comment` (created), with a job-level `if` so only comments starting with `/` start a runner | `ubuntu-slim` | Parse and authorise the command, record the decision, dispatch `publish.yml` when something becomes due | `review-<issue number>` |
-| `publish.yml` | `workflow_dispatch` (from `review-command.yml` or the owner) | `ubuntu-slim` | Publish due items | `publisher`, no cancel |
-| `token-refresh.yml` | weekly schedule; manual | `ubuntu-slim` | Refresh the long-lived Instagram token | `token` |
-| `import-token.yml` | manual only | `ubuntu-slim` | One-time encrypted import of a token from a temporary secret | `token` |
-| `maintenance.yml` | daily schedule; manual | `ubuntu-slim` | Retention clean-up, health checks, daily digest; weekly encrypted backup export | `maintenance` |
-| `migrate.yml` | manual only | `ubuntu-slim` | Apply reviewed database migrations. Other jobs check the schema version and refuse to run on a mismatch. | `migrate` |
+| `ci.yml` | push, pull request | `ubuntu-latest` | Frozen-lockfile install, typecheck, lint, test (including render tests) | per ref, cancel in progress |
+| `collect.yml` | every 2 h, 06:07 to 22:07 IST; manual (dry run by default) | `ubuntu-slim` | Fetch approved sources, store new items; start `draft.yml` when something is new | `collect`, no cancel |
+| `draft.yml` | from `collect.yml` and `review-command.yml`; safety net every 4 h | check job `ubuntu-slim`; render job `ubuntu-latest` until the runner spike passes | Cluster, triage, template caption, render, open or update review issues | `draft`, no cancel |
+| `review-command.yml` | `issue_comment` (created), with a job-level `if` so only comments starting with `/` from owners, members or collaborators start a runner | `ubuntu-slim` | Parse and authorise the command, record the decision, start `draft.yml` or `publish.yml` | `review-<issue number>` |
+| `publish.yml` | from an approval when `PUBLISH_ON_APPROVAL` is `true`; catch-up every 2 h, 08:47 to 20:47 IST; manual (dry run by default) | `ubuntu-slim` | Publish one due item | `publisher`, no cancel |
+| `switch.yml` | manual | `ubuntu-slim` | Set the Sheet switches for collecting and publishing | `switch` |
+| `status.yml` | daily 07:13 IST; manual | `ubuntu-slim` | Read-only health report | `status` |
+| `token-refresh.yml` | Mondays 03:17 IST; manual | `ubuntu-slim` | Refresh the long-lived Instagram token | `token` |
+| `import-token.yml` | manual only (Phase 2) | `ubuntu-slim` | One-time encrypted import of a token from a temporary secret | `token` |
+| `maintenance.yml` | daily schedule; manual (Phase 1) | `ubuntu-slim` | Retention clean-up, daily digest; weekly encrypted backup export | `maintenance` |
+| `migrate.yml` | manual only | `ubuntu-slim` | Create the Sheet's tabs and columns and run the Sheets self test. Other jobs check the layout version and refuse to run on a mismatch. | `migrate` |
+
+`import-token.yml` and `maintenance.yml` are not written yet.
 
 Facts this relies on, from GitHub's documentation (checked 2026-10-29):
 
@@ -186,7 +191,7 @@ type VerificationEvidence =
 
 - The verification level is **derived** from evidence rows; it is never stored as a free-form field that something could set directly.
 - "Independent" means different organisations. Syndicated copies of the same wire report count once.
-- Database `CHECK` constraints make each evidence row reference either source items or an editor login, matching its kind.
+- Each evidence row is parsed with the evidence schema on read, so a row must reference either source items or an editor login, matching its kind.
 - The minimum level per risk tier is defined in the [editorial policy](EDITORIAL_POLICY.md#4-verification-levels).
 
 ### 5.7 Captions
@@ -241,7 +246,7 @@ Risk: R2_SENSITIVE (crime, named person) | Verification: V1_CORROBORATED | Revis
 - Possible duplicates: none
 
 ### Preview
-![preview](<signed URL, valid 7 days>)
+![preview](<public, unguessable Cloudinary URL>)
 
 ### Commands
 /approve-sensitive a1b2c3d4e5f6   /caption (with text)   /attest <how you verified>   /hold <reason>   /reject <reason>
@@ -283,7 +288,7 @@ Instagram API with Instagram Login, host `graph.instagram.com`, pinned Graph API
 
 Gates, all evaluated before container creation **and again immediately before `media_publish`**:
 
-1. Publishing enabled in the database (`system_settings.publishing_enabled`), repository variable `PUBLISHING_ENABLED == "true"`, and `DRY_RUN != "true"`.
+1. Publishing enabled in the Sheet (`settings` tab, `publishing_enabled`), repository variable `PUBLISHING_ENABLED == "true"`, and `DRY_RUN != "true"`.
 2. An approval exists for the exact current revision hash, is not superseded, is younger than the TTL, and came from an allowlisted editor. R2 stories need `/approve-sensitive`.
 3. The verification level meets the minimum for the risk tier.
 4. The validation report passes; the JPEG's SHA-256 matches the approved render.
@@ -297,7 +302,7 @@ Algorithm (one publication per run, to respect spacing):
 claim one due publication with a lease (UPDATE ... WHERE lease expired ... RETURNING)
 run gates; on failure record the reason, release the lease, stop
 if no usable container (none, EXPIRED or ERROR):
-    signed URL (valid 6 h) for the render
+    public Cloudinary URL of the render (its name is the image's SHA-256)
     record attempt "create_container"; call POST /media; store container id
 poll status (about every 60 s, at most 5 min); IN_PROGRESS -> retry in a later run
 if status == PUBLISHED -> reconcile (find the media id) and stop
@@ -330,36 +335,49 @@ Error classification (codes from Meta's error reference):
 
 ## 6. Data model
 
-Postgres schema `newsroom`, deliberately separate from `public` so Supabase's Data API does not expose it; row-level security is enabled anyway. IDs are UUIDv7, generated in the application. All timestamps are `timestamptz`.
+Owner decision, 2026-10-30: storage is a Google Sheet, as in Coimbatore 360 (it replaces the earlier Supabase plan). The `ErodeGlitz Newsroom` Sheet lives in the `erodeglitz@gmail.com` Google account and has one tab per table; row 1 holds the column names. The layout is defined in `src/sheet/tables.ts` and created by the `migrate` workflow.
 
-| Table | Key columns | Notable constraints |
+Jobs reach the Sheet only through the Apps Script bridge (`apps-script/Code.gs`), a web app bound to the Sheet:
+
+- Every request is a POST whose body carries the key (`BRIDGE_KEY` in Script properties). Apps Script cannot read request headers, and the key is never put in the URL.
+- Every request holds the script lock, so "insert if absent", compare-and-set updates and publication leases are atomic even when two workflows run at once.
+- The bridge knows no news logic. It offers `select`, `insert` (with a unique key and an optional "refuse if" rule), `upsert`, compare-and-set `update` (with order and limit, used for leases), `batch`, and secrets in Script properties. Nothing is ever deleted.
+- Tabs marked append-only (`decisions`, `evidence`, `drafts`, `publish_attempts`, `errors`) refuse `update` and `upsert`.
+- Every cell is written as plain text, and text that Sheets would read as a formula (`=`, `+`, `-`, `@`, `'`) is stored literally, so a headline or a source title can never become a formula. The `migrate` workflow checks this against the real Sheet with a self test.
+- Retries are safe: inserts carry their own id, and a row with the same id is recognised as the client's own earlier request whose answer was lost.
+
+Cells are text: timestamps are UTC ISO strings (`Date.toISOString()`, one fixed length, so they compare correctly as text), lists are JSON, booleans are `true` / `false`, and an empty cell means "not set". IDs are UUIDv7, generated in the application. Every row is parsed with the domain's Zod schemas when it is read, so a bad hand edit is reported with its tab and row instead of reaching the publisher.
+
+| Tab | Columns | Rules |
 |---|---|---|
-| `sources` | id, name, kind, url, trust_tier, terms_status, terms_reviewed_at, terms_notes, allowed_use, robots_checked_at, enabled, etag, last_modified, last_fetched_at, consecutive_failures | |
-| `source_items` | id, source_id, external_id, canonical_url, url_hash, title, excerpt (≤ 500 chars), language, published_at, fetched_at, content_hash, minhash (bytea), story_id | unique (source_id, url_hash) |
-| `stories` | id, status, version, category, place_tags, risk_tier, risk_flags (jsonb), disputed, first_seen_at, updated_at, expires_at | status from a fixed set |
-| `story_sources` | story_id, source_item_id, relation (`primary`, `corroborating`, `contradicting`) | primary key (story_id, source_item_id) |
-| `verification_evidence` | id, story_id, kind, source_item_ids, editor_login, method, created_at | `CHECK` per kind; no AI kind exists |
-| `drafts` | id, story_id, revision, revision_hash, headline_ta, caption_ta, hashtags, alt_text, template_version, render_key, render_sha256, origin (`manual`, `template`, `llm`), llm_model, validation (jsonb), created_at | unique (story_id, revision), unique (revision_hash) |
-| `review_threads` | story_id, issue_number, last_synced_revision | unique (issue_number) |
-| `editorial_decisions` | id, story_id, draft_id, revision_hash, decision, editor_login, github_comment_id, reason, created_at | append-only; unique (github_comment_id) |
-| `publications` | id, story_id, draft_id, idempotency_key, status, scheduled_for, container_id, container_created_at, media_id, permalink, attempts, next_attempt_at, lease_owner, lease_expires_at, published_at | unique (idempotency_key); unique (media_id); at most one live publication per story (partial unique index) |
-| `publish_attempts` | id, publication_id, step, http_status, error_code, error_subcode, is_transient, response_meta (redacted jsonb), created_at | append-only |
-| `system_settings` | key, value (jsonb), updated_by, updated_at, reason | holds `publishing_enabled` and the kill-switch reason |
-| `secrets` | name, ciphertext, iv, auth_tag, key_version, expires_at, updated_at | AES-256-GCM; key held outside the database |
-| `job_runs` | id, workflow, run_id, git_sha, started_at, finished_at, status, counters (jsonb) | |
-| `errors` | id, job_run_id, stage, entity_type, entity_id, error_class, code, message (redacted), retryable, created_at | |
-| `llm_usage` | id, job_run_id, model, input_tokens, output_tokens, cache_read_tokens, estimated_cost_usd, created_at | Phase 3 |
+| `settings` | key, enabled, reason, updated_by, updated_at | Holds `publishing_enabled` and `collecting_enabled`. A missing row or any value other than exactly `true` means off. |
+| `sources` | id, name, kind, url, trust_tier, erode_specific, terms_status, terms_reviewed_by, terms_reviewed_at, terms_notes, allowed_use, llm_input_allowed, link_pattern, fetch_interval_minutes, enabled, etag, last_modified, last_fetched_at, consecutive_failures, updated_at | Mirror of `src/config/sources.ts`; registry columns are overwritten each run, fetch state is kept |
+| `source_items` | id, source_id, canonical_url, url_hash, title, excerpt (≤ 500 chars), language, published_at, fetched_at, content_hash, story_id | unique (source_id, url_hash) |
+| `story_sources` | story_id, source_item_id, relation (`primary`, `corroborating`, `contradicting`), created_at | unique (story_id, source_item_id) |
+| `stories` | id, status, version, topic, place_tags, risk_tier, risk_flags, disputed, priority, first_seen_at, updated_at, expires_at | updates are compare-and-set on `version` |
+| `evidence` | id, story_id, kind, source_item_ids, editor_login, method, attested_at, created_at | append-only; no AI kind exists |
+| `drafts` | id, story_id, revision, revision_hash, headline_ta, caption_ta, hashtags, alt_text, source_credit_ta, template_version, render_key, render_sha256, origin, created_at | append-only; one row per (story_id, revision) |
+| `decisions` | id, story_id, kind, editor_login, github_comment_id, revision_hash, reason, scheduled_for, created_at | append-only; unique (github_comment_id) |
+| `review_threads` | story_id, issue_number, last_synced_revision, updated_at | one row per story |
+| `publications` | id, story_id, draft_id, idempotency_key, status, scheduled_for, attempts, container_id, container_created_at, publish_requested_at, media_id, permalink, next_attempt_at, lease_owner, lease_expires_at, published_at, last_error, created_at, updated_at | unique (idempotency_key); at most one live publication per story; leases taken and saved under the script lock |
+| `publish_attempts` | id, publication_id, step, outcome, http_status, error_code, error_subcode, is_transient, detail (redacted), created_at | append-only |
+| `job_runs` | id, workflow, run_id, git_sha, started_at, finished_at, status, counters | |
+| `errors` | id, job_run_id, stage, entity_type, entity_id, error_class, code, message (redacted), retryable, created_at | append-only |
+
+The Instagram token is not in any tab. It is encrypted with AES-256-GCM (key `TOKEN_ENCRYPTION_KEY`, held only in GitHub) and stored in the bridge's Script properties under `SECRET_instagram_token`, with its expiry readable for alerts.
+
+Card images are on Cloudinary under `<CLOUDINARY_FOLDER>/renders/<yyyy>/<mm>/<sha256>`. Uploads are signed with the API secret and never overwrite.
 
 `idempotency_key = sha256(story_id + revision_hash + ig_user_id)`.
 
-Domain code never sees Drizzle row types. Repositories map rows to domain types explicitly, which also keeps `exactOptionalPropertyTypes` friction out of the domain layer.
+Known limits of a Sheet compared with a database: anyone who can edit the Sheet (only the owner) can change history by hand; the bridge's append-only rule cannot stop that. A batch of operations is not a transaction: an error stops it midway. Each call takes about 1–2 seconds. Up to 10 million cells per Sheet.
 
 ## 7. Kill switch
 
 Publishing requires **all** of the following:
 
 1. Repository variable `PUBLISHING_ENABLED` is exactly `true`. Workflows check it in an `if:` before the publish step even starts.
-2. Database flag `system_settings.publishing_enabled` is `true`, read fresh before container creation and again before `media_publish`.
+2. The Sheet switch `publishing_enabled` (`settings` tab) is exactly `true`, read fresh before container creation and again before `media_publish`.
 3. `DRY_RUN` is not `true`. Code defaults to dry run when the variable is missing.
 
 Ways to stop publishing:
@@ -369,13 +387,13 @@ Ways to stop publishing:
 - `gh workflow disable publish.yml` and `pipeline.yml`.
 - Last resort: revoke the token or remove the app's access in Instagram or Meta settings.
 
-The system trips the database switch automatically on authentication or token errors, a spam or restriction error, two unresolved `publish_unknown` states, an impossible daily count, or a detected duplicate post. Only the owner can switch it back on. The procedure is in the [operations runbook](OPERATIONS.md#4-kill-switch).
+The system trips the Sheet switch automatically on authentication or token errors, a spam or restriction error, two unresolved `publish_unknown` states, an impossible daily count, or a detected duplicate post. Only the owner can switch it back on. The procedure is in the [operations runbook](OPERATIONS.md#4-kill-switch).
 
 ## 8. Idempotency and retries by stage
 
 | Stage | Guard | On failure |
 |---|---|---|
-| Fetch | unique (source_id, url_hash); conditional GET | Retry next run. After 6 consecutive failures, disable the source and raise an alert. |
+| Fetch | unique (source_id, url_hash), enforced by the bridge under its lock; conditional GET | Retry next run. After 6 consecutive failures, disable the source and raise an alert. |
 | Normalise, cluster, triage | Deterministic functions; upserts; optimistic `version` | Safe to rerun |
 | LLM draft | Cache by input hash; at most 2 attempts | Fall back to manual caption |
 | Render | Content-addressed object key | Safe to rerun |
@@ -383,7 +401,7 @@ The system trips the database switch automatically on authentication or token er
 | Editorial decision | unique `github_comment_id` | Duplicate events ignored |
 | Container creation | Stored container ID, reused while `FINISHED` and less than 24 h old | New container only after `EXPIRED` or `ERROR` |
 | `media_publish` | Container status checked before any retry; `PUBLISHED` means never call again | Ambiguous outcome becomes `publish_unknown` and is reconciled |
-| Token refresh | Row-level lock on the secret | Retry next day; alert when fewer than 14 days remain |
+| Token refresh | Weekly schedule with a workflow concurrency group; the token must be at least 24 h old | Retry next day; alert when fewer than 14 days remain |
 
 ## 9. Security
 
@@ -391,11 +409,10 @@ The system trips the database switch automatically on authentication or token er
 
 | Secret | Where it lives | Used by | Rotation |
 |---|---|---|---|
-| `DATABASE_URL` (session pooler, least-privilege `newsroom_app` role) | GitHub repository secret | all jobs | on suspicion; yearly |
-| `SUPABASE_SECRET_KEY` (server-side key; used only for Storage calls, but powerful, so it never leaves the jobs) | GitHub repository secret | render, publish | on suspicion; yearly |
+| `SHEET_BRIDGE_URL` (Apps Script web app URL) and `SHEET_BRIDGE_KEY` (the bridge's `BRIDGE_KEY`) | GitHub repository secrets; the key also in the bridge's Script properties | all jobs | on suspicion; yearly (new key in Script properties, then the secret) |
+| `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` | GitHub repository secrets | render, publish | on suspicion; yearly |
 | `TOKEN_ENCRYPTION_KEY` (32 random bytes, base64) | GitHub repository secret | token import, refresh, publish | yearly; `key_version` allows rolling |
-| `BACKUP_ENCRYPTION_KEY` | GitHub repository secret, plus an offline copy kept by the owner | backup export | yearly |
-| Instagram long-lived token | `secrets` table, encrypted | publish, refresh | refreshed weekly (valid 60 days) |
+| Instagram long-lived token | Bridge Script properties, encrypted | publish, refresh | refreshed weekly (valid 60 days) |
 | `IG_BOOTSTRAP_TOKEN` | Temporary GitHub secret, deleted right after import | `import-token.yml` | single use |
 | `ANTHROPIC_API_KEY` (Phase 3) | GitHub repository secret | draft | on suspicion |
 
@@ -403,20 +420,20 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 
 ### Controls
 
-- Database: tables live in schema `newsroom`, which is not exposed through Supabase's Data API; row-level security is enabled; the application role has only the grants it needs; no superuser credentials in jobs.
-- The storage bucket is private. Meta gets a signed URL valid for 6 hours; review previews get one valid for 7 days. Object keys are content hashes and reveal nothing.
+- Sheet: not shared with anyone; the Google account has two-factor authentication; the bridge's manifest limits it to this one Sheet (`spreadsheets.currentonly`); every request needs the key; the bridge never deletes rows and refuses changes to append-only tabs.
+- Card images are public on Cloudinary at URLs that hold the image's SHA-256, so they cannot be guessed. The URLs appear only in the private review issue and in the request to Meta. Uploads are signed; there is no unsigned upload preset.
 - The token is sent in a header where Meta supports it (to be verified in Phase 2), never in a logged URL. A logger redaction list covers `access_token`, `Authorization`, `apikey`, `password` and secret names.
 - `GITHUB_TOKEN` permissions are declared per workflow. There are no `pull_request_target` workflows. Untrusted text reaches scripts only through environment variables.
 - Supply chain: `pnpm install --frozen-lockfile`; build scripts only for allowlisted packages; a minimum release age for new package versions if pnpm 11 supports it (verify in Phase 0); actions pinned to full commit SHAs; Dependabot.
 - Prompt injection: source text is untrusted. The model only drafts from a structured fact sheet, has no tools, and its output is schema-checked, fact-checked and human-approved.
-- No inbound network endpoints.
+- One inbound endpoint: the Apps Script bridge, protected by its key. No other inbound endpoints.
 
 ## 10. Cost controls (technical)
 
 - Workflow schedules sized to the minutes budget ([Operations §9](OPERATIONS.md#9-cost-monitoring-and-budgets)); `ubuntu-slim` where it works; pnpm store and Playwright browser caching; the Chromium step runs only when something needs rendering; job-level `if` filters so non-command comments never start a runner.
 - `timeout-minutes` on every job.
 - LLM (Phase 3): drafts only for shortlisted stories; at most 3 LLM revisions per story; a daily item cap; a monthly USD cap computed from `llm_usage`; prompt caching for the stable system prompt; the Batch API (50% cheaper) for anything not urgent; a Console spend limit as the final backstop.
-- Storage: retention jobs keep the database under the 500 MB and storage under the 1 GB Free limits.
+- Storage: the Sheet's 10 million cells last many years at this volume; a retention job (still to write) can archive old rows. Cloudinary Free plan limits are checked on its pricing page during setup.
 
 ## 11. Code organisation and coding standards
 
@@ -425,7 +442,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 .github/ISSUE_TEMPLATE/ tip, incident
 assets/fonts/           OFL Tamil fonts and licence
 config/                 sources.ts, gazetteer.ts, sensitivity-rules.ts, hashtags.ts
-db/migrations/          generated SQL, reviewed before merge
+apps-script/            the Sheet bridge (Code.gs, appsscript.json), pasted into Apps Script by the owner
 src/
   domain/               types, schemas, state machines, verification and risk rules (pure, no I/O)
   config/               environment schema (Zod), fail-closed defaults
@@ -435,8 +452,8 @@ src/
   graphics/             templates, renderer, text fitting
   review/               GitHub issue sync, command parser, authorisation
   publishing/           instagram client, gates, publisher, reconciler, error classification
-  storage/              object store interface, Supabase implementation
-  db/                   schema, client, repositories, row mappers
+  storage/              object store interface, Cloudinary implementation
+  sheet/                bridge client, tab layout, stores (row mappers), setup and self test
   ops/                  kill switch, budgets, alerts, logger, run context, backup
   jobs/                 CLI entry points, one per job
 test/                   fixtures, integration tests
@@ -501,7 +518,7 @@ Rules:
 ## 12. Testing strategy
 
 - **Unit (Vitest):** state machines, gates, verification derivation, risk tiering, normalisation, MinHash and clustering, command parsing, caption validators, error classification, configuration defaults.
-- **Integration:** repositories and migrations against PGlite (in-process Postgres, no Docker), including the unique constraints and leases.
+- **Integration:** the stores run against the real `apps-script/Code.gs` inside a Node `vm` with a fake Sheet that copies Sheets' text conversions (formulas, numbers, dates), including unique keys, append-only tabs and leases. The same contract tests run against the in-memory stores, and the end-to-end flow test runs on both.
 - **Contract:** the Instagram client against recorded fixtures shaped like Meta's documented responses and errors, with the network mocked. Tests never call the real Instagram API.
 - **Rendering:** smoke tests check dimensions, JPEG format, size limit and that fonts loaded. Pixel snapshots run only in CI, on a fixed runner image.
 - **Safety invariants**, each with a dedicated test:
@@ -520,7 +537,8 @@ Rules:
 | Topic | Chosen | Not chosen, and why |
 |---|---|---|
 | Instagram login type | Instagram Login | Facebook Login for Business needs a linked Facebook Page and Page token. Unified Login is recommended by Meta for new integrations and needs a business portfolio, but its system-user token setup was not documented on the pages checked; re-evaluate in Phase 2. |
-| Review desk | GitHub Issues | Telegram (new account, polling); a web admin (needs hosting and authentication); Supabase Studio (not suitable for editors on a phone) |
+| Review desk | GitHub Issues | Telegram (new account, polling); a web admin (needs hosting and authentication); editing the Sheet directly (no per-command audit trail, and easy to break on a phone) |
 | Rendering | Chromium | SVG-to-image or canvas libraries need manual line breaking, and their Tamil shaping would have to be proven; Satori relies on opentype.js rather than HarfBuzz, which is a known risk for complex scripts (unverified for Tamil) |
-| Database | Supabase | Neon Free (more storage per project, but no object storage of its own); committing state files to git (not a database, conflicts with concurrent runs) |
-| Storage of the Instagram token | Encrypted in the database | Updating a GitHub secret from a workflow would need a personal access token with secret-write rights, another powerful long-lived credential |
+| Storage | Google Sheet through an Apps Script bridge (owner decision, 2026-10-30, same as Coimbatore 360) | Supabase Postgres (the earlier plan: real transactions and constraints; replaced at the owner's request); committing state files to git (conflicts with concurrent runs) |
+| Card images | Cloudinary (same as Coimbatore 360) | Google Drive links (Instagram often cannot fetch them); a public GitHub Pages repository (every card, including rejected ones, would be in a public git history) |
+| Storage of the Instagram token | Encrypted, in the bridge's Script properties | Updating a GitHub secret from a workflow would need a personal access token with secret-write rights, another powerful long-lived credential |

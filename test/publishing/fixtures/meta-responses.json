@@ -1,0 +1,64 @@
+{
+  "_note": "Shapes follow Meta's Instagram Platform documentation (content publishing guide and error reference, read 2026-10-29). Values are invented. Not recorded from the live API.",
+  "createContainer": { "id": "17889615691921648" },
+  "statusInProgress": { "status_code": "IN_PROGRESS", "id": "17889615691921648" },
+  "statusFinished": { "status_code": "FINISHED", "id": "17889615691921648" },
+  "statusPublished": { "status_code": "PUBLISHED", "id": "17889615691921648" },
+  "statusExpired": { "status_code": "EXPIRED", "id": "17889615691921648" },
+  "statusError": { "status_code": "ERROR", "status": "Error: Media download has failed. (2207003)", "id": "17889615691921648" },
+  "publish": { "id": "17920238422030506" },
+  "permalink": { "permalink": "https://www.instagram.com/p/DExampleCode/", "id": "17920238422030506" },
+  "publishingLimit": { "data": [{ "quota_usage": 2, "config": { "quota_total": 50, "quota_duration": 86400 } }] },
+  "publishingLimitFull": { "data": [{ "quota_usage": 50, "config": { "quota_total": 50, "quota_duration": 86400 } }] },
+  "mediaEmpty": { "data": [] },
+  "refresh": { "access_token": "IGAAnewtokennewtokennewtokennewtokennewtokennewtoken", "token_type": "bearer", "expires_in": 5183944 },
+  "errorSpam": {
+    "error": {
+      "message": "The action was blocked because it looks like spam.",
+      "type": "OAuthException",
+      "code": 4,
+      "error_subcode": 2207051,
+      "is_transient": false,
+      "fbtrace_id": "AbCdEfGhIjK"
+    }
+  },
+  "errorRestricted": {
+    "error": {
+      "message": "The account is restricted.",
+      "type": "OAuthException",
+      "code": 25,
+      "error_subcode": 2207050,
+      "is_transient": false,
+      "fbtrace_id": "AbCdEfGhIjL"
+    }
+  },
+  "errorServer": {
+    "error": {
+      "message": "An unexpected error has occurred. Please retry your request later.",
+      "type": "OAuthException",
+      "code": -1,
+      "error_subcode": 2207001,
+      "is_transient": true,
+      "fbtrace_id": "AbCdEfGhIjM"
+    }
+  },
+  "errorQuota": {
+    "error": {
+      "message": "The account has reached its publishing limit.",
+      "type": "OAuthException",
+      "code": 9,
+      "error_subcode": 2207042,
+      "is_transient": false,
+      "fbtrace_id": "AbCdEfGhIjN"
+    }
+  },
+  "errorExpiredContainer": {
+    "error": { "message": "The media container has expired.", "type": "OAuthException", "code": -2, "error_subcode": 2207020, "fbtrace_id": "AbCdEfGhIjO" }
+  },
+  "errorImageFetch": {
+    "error": { "message": "The media could not be fetched from this URI.", "type": "OAuthException", "code": 9004, "error_subcode": 2207052, "fbtrace_id": "AbCdEfGhIjP" }
+  },
+  "errorInvalidToken": {
+    "error": { "message": "Error validating access token: Session has expired.", "type": "OAuthException", "code": 190, "fbtrace_id": "AbCdEfGhIjQ" }
+  }
+}

@@ -1,0 +1,49 @@
+name: collect
+# Coimbatore 360 "research_free.yml", Erode version: every 2 hours from 06:07 to 22:07 IST, read the approved sources,
+# keep Erode-district items, store them in the Google Sheet, then start "draft" when something new arrived.
+# Differences on purpose: only sources with a recorded terms review are fetched, robots.txt is obeyed, the bot names itself
+# in its User-Agent, and only a title and a short excerpt are stored (never the article text, never photos).
+# Switches: repository variable COLLECTING_ENABLED must be "true" for scheduled runs (a skipped job costs no minutes),
+# and the Sheet switch "collecting_enabled" must be on (Actions -> switch).
+on:
+  schedule:
+    - cron: "7 6-22/2 * * *"
+      timezone: "Asia/Kolkata"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fetch and report only; write nothing to the Sheet"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+  actions: write # starts draft.yml when new items arrive
+concurrency:
+  group: collect
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.event_name != 'schedule' || vars.COLLECTING_ENABLED == 'true'
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    outputs:
+      new_items: ${{ steps.collect.outputs.new_items }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Collect
+        id: collect
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          COLLECTING_ENABLED: ${{ vars.COLLECTING_ENABLED }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || 'false' }}
+          MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
+        run: pnpm run job:collect
+      - name: Start draft when something new arrived
+        if: steps.collect.outputs.new_items != '' && steps.collect.outputs.new_items != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run draft.yml --repo "$GITHUB_REPOSITORY"

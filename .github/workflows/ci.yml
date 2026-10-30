@@ -1,0 +1,26 @@
+name: ci
+# Typecheck, lint and tests on every push and pull request (the Coimbatore 360 "tests.yml" idea: an old bug that comes back fails here first).
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          browser: "true"
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run test
