@@ -9,12 +9,13 @@ import { runJob } from "./context.ts";
 
 const checkOnly = process.env["DRAFT_MODE"] === "check";
 const onlyStoryId = (process.env["STORY_ID"] ?? "").trim() || undefined;
+const refreshIssues = process.env["REFRESH_ISSUES"] === "true";
 
 await runJob(
   checkOnly ? "draft-check" : "draft",
   async ({ env, stores, clock, count }) => {
     if (checkOnly) {
-      const pending = await pendingDraftWork({ stores }, onlyStoryId);
+      const pending = await pendingDraftWork({ stores }, onlyStoryId, refreshIssues);
       setOutput("pending", pending);
       appendSummary(`### draft check: ${pending} item(s) of work`);
       return pending === 0 ? "skipped" : "succeeded";
@@ -37,6 +38,7 @@ await runJob(
           renderer: async () => (renderer ??= await createRenderer()),
         },
         onlyStoryId,
+        refreshIssues,
       );
       count("revisions", report.revisions);
       appendSummary(

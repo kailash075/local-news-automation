@@ -27,7 +27,7 @@ export type DraftDeps = {
   clock: Clock;
   sourceFor: (id: string) => Source | undefined;
   objects: Pick<ObjectStore, "put" | "publicUrl">;
-  issues: Pick<IssuesClient, "create" | "updateBody" | "comment" | "findByMarker">;
+  issues: Pick<IssuesClient, "create" | "update" | "comment" | "findByMarker">;
   /** Started lazily: Chromium is launched only when a card has to be rendered. */
   renderer: () => Promise<Renderer>;
 };
@@ -91,8 +91,11 @@ const describeRenderError = (e: RenderError): string => {
   }
 };
 
-/** Work for the Chromium job: stories that need a new revision or still have no review issue. */
-export const pendingDraftWork = async (deps: Pick<DraftDeps, "stores">, onlyStoryId?: string): Promise<number> => {
+/**
+ * Work for the Chromium job: stories that need a new revision or still have no review issue. With `refreshIssues`,
+ * every active story counts, because its issue is rewritten.
+ */
+export const pendingDraftWork = async (deps: Pick<DraftDeps, "stores">, onlyStoryId?: string, refreshIssues = false): Promise<number> => {
   const unassigned = (await deps.stores.sourceItems.listUnassigned(1)).length;
   let stories = 0;
   for (const story of await deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100)) {
@@ -101,7 +104,7 @@ export const pendingDraftWork = async (deps: Pick<DraftDeps, "stores">, onlyStor
     const draft = await deps.stores.drafts.latestFor(story.id);
     const needsRevision = request !== undefined && (draft === undefined || request.requestedAt > draft.createdAt);
     const needsIssue = (await deps.stores.reviewThreads.getIssueNumber(story.id)) === undefined;
-    if (needsRevision || needsIssue || onlyStoryId !== undefined) stories += 1;
+    if (needsRevision || needsIssue || onlyStoryId !== undefined || refreshIssues) stories += 1;
   }
   return unassigned + stories;
 };
@@ -180,7 +183,8 @@ export type DraftReport = {
   problems: readonly string[];
 };
 
-export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string): Promise<DraftReport> => {
+/** `refreshIssues` rewrites the title and body of every active story's issue, for example after a template change. */
+export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIssues = false): Promise<DraftReport> => {
   const report = { revisions: 0, issuesCreated: 0, issuesUpdated: 0, deferred: 0, problems: [] as string[] };
   const stories = (await deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100)).filter(
     (s) => onlyStoryId === undefined || s.id === onlyStoryId,
@@ -198,7 +202,7 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string): Promise<
     const decisions = await deps.stores.decisions.listFor(story.id);
     const items = await deps.stores.sourceItems.listForStory(story.id);
     let draft = await deps.stores.drafts.latestFor(story.id);
-    let changed = issueNumber === undefined || onlyStoryId !== undefined;
+    let changed = issueNumber === undefined || onlyStoryId !== undefined || refreshIssues;
 
     const request = captionRequest(decisions);
     if (request !== undefined && (draft === undefined || request.requestedAt > draft.createdAt)) {
@@ -233,6 +237,7 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string): Promise<
       const source = deps.sourceFor(i.sourceId);
       return {
         name: source?.name ?? i.sourceId,
+        title: i.title,
         url: i.canonicalUrl,
         trustTier: source?.trustTier ?? "T3_other",
         relation: index === 0 ? "primary" : "corroborating",
@@ -250,12 +255,13 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string): Promise<
       ...(previewUrl === undefined ? {} : { previewUrl }),
     });
 
+    const title = renderIssueTitle(story, draft, items[0]?.title);
     if (issueNumber === undefined) {
       const found = await deps.issues.findByMarker(STORY_LABEL, storyMarker(story.id));
       if (found.ok && found.value !== undefined) issueNumber = found.value.number;
     }
     if (issueNumber === undefined) {
-      const created = await deps.issues.create(renderIssueTitle(story, draft), body, [STORY_LABEL]);
+      const created = await deps.issues.create(title, body, [STORY_LABEL]);
       if (!created.ok) {
         report.problems.push(`${story.id}: ${created.error}`);
         continue;
@@ -263,7 +269,7 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string): Promise<
       issueNumber = created.value.number;
       report.issuesCreated += 1;
     } else {
-      const updated = await deps.issues.updateBody(issueNumber, body);
+      const updated = await deps.issues.update(issueNumber, title, body);
       if (!updated.ok) {
         report.problems.push(`${story.id}: ${updated.error}`);
         continue;

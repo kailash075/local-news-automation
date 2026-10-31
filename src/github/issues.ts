@@ -10,7 +10,8 @@ export type IssueRef = { number: number; body: string; state: "open" | "closed";
 
 export type IssuesClient = {
   create: (title: string, body: string, labels: readonly string[]) => Promise<Result<IssueRef, string>>;
-  updateBody: (issueNumber: number, body: string) => Promise<Result<void, string>>;
+  /** Replaces the title and the body; the review desk owns both. */
+  update: (issueNumber: number, title: string, body: string) => Promise<Result<void, string>>;
   comment: (issueNumber: number, body: string) => Promise<Result<void, string>>;
   close: (issueNumber: number, reason: "completed" | "not_planned") => Promise<Result<void, string>>;
   /** Fallback when the database lost the issue number: scans recent issues with the label for a hidden marker. */
@@ -75,8 +76,8 @@ export const createIssuesClient = (options: {
       const parsed = IssueSchema.safeParse(res.value);
       return parsed.success ? ok(toRef(parsed.data)) : err("unexpected GitHub response for issue creation");
     },
-    updateBody: async (issueNumber, body) => {
-      const res = await call("PATCH", `/issues/${issueNumber}`, { body: clip(body) });
+    update: async (issueNumber, title, body) => {
+      const res = await call("PATCH", `/issues/${issueNumber}`, { title: title.slice(0, 250), body: clip(body) });
       return res.ok ? ok(undefined) : res;
     },
     comment: async (issueNumber, body) => {

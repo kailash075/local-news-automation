@@ -13,6 +13,8 @@ import { shortHash } from "./revision-hash.ts";
 
 export type IssueSource = {
   name: string;
+  /** The source's own headline, shown so the editor knows the story without opening the link. */
+  title: string;
   url: string;
   trustTier: TrustTier;
   relation: StoryRelation;
@@ -85,10 +87,16 @@ export const REVIEWER_CHECKLIST: readonly string[] = [
   "Tamil is correct and readable; the graphic text matches the caption",
 ];
 
-export const renderIssueTitle = (story: Story, draft: DraftRevision | undefined): string => {
+/**
+ * The editor's headline once there is a draft; before that, the lead source's headline and the topic, so the issues of
+ * one run can be told apart. (Story ids are UUIDv7: their first characters are the creation time, the same for a run.)
+ */
+export const renderIssueTitle = (story: Story, draft: DraftRevision | undefined, leadSourceTitle?: string): string => {
   const tier = story.riskTier === "R2_SENSITIVE" || story.disputed ? "[R2] " : "";
-  const headline = draft?.headlineTa ?? `${story.topic} story ${story.id.slice(0, 8)}`;
-  return `${tier}${headline}`.slice(0, 200);
+  const lead = leadSourceTitle?.replace(/\s+/g, " ").trim();
+  const headline =
+    draft?.headlineTa ?? (lead === undefined || lead === "" ? `${story.topic} story ${story.id.slice(-8)}` : `${lead} (${story.topic})`);
+  return `${tier}${headline.replace(/@(?=[A-Za-z0-9])/g, "@\u200B")}`.slice(0, 200);
 };
 
 export const renderIssueBody = (input: IssueBodyInput): string => {
@@ -119,7 +127,9 @@ export const renderIssueBody = (input: IssueBodyInput): string => {
   input.sources.forEach((s, i) => {
     const published = s.publishedAt === undefined ? "date unknown" : `published ${formatIst(new Date(s.publishedAt))} ${s.publishedAt.slice(0, 10)}`;
     const url = safeUrl(s.url);
-    lines.push(`${i + 1}. ${neutralise(s.name)}, ${url === undefined ? "(invalid URL)" : `<${url}>`}, ${published}, tier ${s.trustTier}, ${s.relation}`);
+    lines.push(
+      `${i + 1}. “${neutralise(s.title)}”: ${neutralise(s.name)}, ${url === undefined ? "(invalid URL)" : `<${url}>`}, ${published}, tier ${s.trustTier}, ${s.relation}`,
+    );
   });
   lines.push("");
 

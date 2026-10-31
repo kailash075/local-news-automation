@@ -28,15 +28,15 @@ const sourceFor = (id: string): Source | undefined => sources.find((s) => s.id =
 const fakeIssues = () => {
   const issues = new Map<number, IssueRef>();
   const comments: string[] = [];
-  const client: Pick<IssuesClient, "create" | "updateBody" | "comment" | "findByMarker"> = {
+  const client: Pick<IssuesClient, "create" | "update" | "comment" | "findByMarker"> = {
     create: (title, body) => {
       const ref: IssueRef = { number: issues.size + 1, title, body, state: "open" };
       issues.set(ref.number, ref);
       return Promise.resolve(ok(ref));
     },
-    updateBody: (n, body) => {
+    update: (n, title, body) => {
       const existing = issues.get(n);
-      if (existing !== undefined) issues.set(n, { ...existing, body });
+      if (existing !== undefined) issues.set(n, { ...existing, title, body });
       return Promise.resolve(ok(undefined));
     },
     comment: (_n, body) => {

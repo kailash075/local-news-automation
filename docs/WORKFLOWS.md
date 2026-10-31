@@ -96,7 +96,7 @@ The Google Sheet adds time: each bridge call takes about 1–2 seconds, and a dr
 
 ## 6. What the owner does each day (once live)
 
-1. Open the GitHub app → this repository → **Issues**. Each new story has one issue with the card preview, sources and checks. A draft run opens at most 10 new issues, power cuts and the newest first; the rest follow in the next run.
+1. Open the GitHub app → this repository → **Issues**. Each new story has one issue with the card preview, sources and checks. A draft run opens at most 10 new issues, power cuts and the newest first; the rest follow in the next run. Until you write a caption, an issue's title is the newspaper's headline; then it becomes your headline. After an update to the issue layout, run **Actions → draft** with **refresh issues** ticked to rewrite all open issues.
 2. Approve with `/approve <rev>` (or `/approve-sensitive <rev>`), fix with `/caption …`, or `/reject <reason>`.
 3. Check **Actions → status** once a day.
 4. If something goes wrong, `/killswitch on <reason>` on any issue.

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { GitHubLoginSchema } from "../../src/domain/types.ts";
+import { GitHubLoginSchema, StoryIdSchema } from "../../src/domain/types.ts";
 import { toIso } from "../../src/publishing/ist.ts";
 import { authorise, isApprovalExpired, type CommandContext } from "../../src/review/authorise.ts";
 import { MAX_COMMENT_CHARS, parseCommand, type ReviewCommand } from "../../src/review/commands.ts";
-import { parseStoryMarker, renderIssueBody, storyMarker } from "../../src/review/issue-body.ts";
+import { parseStoryMarker, renderIssueBody, renderIssueTitle, storyMarker } from "../../src/review/issue-body.ts";
 import { canonicalJson, revisionHash, shortHash } from "../../src/review/revision-hash.ts";
 import { EDITOR, makeDraft, makeStory, NOON_IST, withoutRender } from "./fakes.ts";
 
@@ -214,7 +214,15 @@ describe("issue body", () => {
       story,
       draft: makeDraft(story, { captionTa: `${storyMarker(other.id)} @someone` }),
       verificationLevel: "V1_CORROBORATED",
-      sources: [{ name: "<!-- erodeglitz:story=x --> @mention", url: "https://example.org/a b", trustTier: "T2_established_publisher", relation: "primary" }],
+      sources: [
+        {
+          name: "<!-- erodeglitz:story=x --> @mention",
+          title: "@headline <b>",
+          url: "https://example.org/a b",
+          trustTier: "T2_established_publisher",
+          relation: "primary",
+        },
+      ],
       checks: ["Caption 80/1800 characters"],
       possibleDuplicates: [],
     });
@@ -222,8 +230,44 @@ describe("issue body", () => {
     expect(parseStoryMarker(`intro\n${storyMarker(other.id)}`)).toBeUndefined();
     expect(body).not.toContain("@someone");
     expect(body).not.toContain("@mention");
+    expect(body).not.toContain("@headline");
+    expect(body).not.toContain("<b>");
     expect(body).toContain("https://example.org/a%20b");
     expect(body.match(/<!-- erodeglitz:story=/g)).toHaveLength(1);
+  });
+
+  it("lists each source with its own headline", () => {
+    const story = makeStory();
+    const body = renderIssueBody({
+      story,
+      verificationLevel: "V0_UNVERIFIED",
+      sources: [
+        {
+          name: "Dinakaran, Erode district",
+          title: "சிவகிரி வாரச்சந்தையில் தேங்காய் வரத்து அதிகரிப்பு",
+          url: "https://www.dinakaran.com/district/erode_301026_3",
+          trustTier: "T2_established_publisher",
+          relation: "primary",
+          publishedAt: toIso(new Date("2026-10-30T01:03:34.000Z")),
+        },
+      ],
+      checks: [],
+      possibleDuplicates: [],
+    });
+    expect(body).toContain("1. “சிவகிரி வாரச்சந்தையில் தேங்காய் வரத்து அதிகரிப்பு”: Dinakaran, Erode district, <https://www.dinakaran.com/district/erode_301026_3>");
+  });
+
+  it("titles: the editor's headline, else the lead source's headline, never the same text for every story of a run", () => {
+    // Two real story ids from one run: UUIDv7, so their first eight characters (the creation time) are equal.
+    const story = makeStory({ topic: "business", id: StoryIdSchema.parse("01a18dfb-0c1b-721f-8012-c1f39a5596ab") });
+    const twin = makeStory({ topic: "business", id: StoryIdSchema.parse("01a18dfb-0c1b-7325-a023-8d8913b72d06") });
+    expect(renderIssueTitle(story, makeDraft(story))).toBe(makeDraft(story).headlineTa);
+    expect(renderIssueTitle(story, undefined, "  ரூ.4.42 கோடிக்கு\n கொப்பரை ஏலம் ")).toBe("ரூ.4.42 கோடிக்கு கொப்பரை ஏலம் (business)");
+    // Regression (first real draft run, 2026-10-30): ten issues were all titled "business story 01a18dfb".
+    expect(renderIssueTitle(story, undefined)).not.toBe(renderIssueTitle(twin, undefined));
+    expect(renderIssueTitle(story, undefined, "@someone said")).not.toContain("@someone");
+    const sensitive = makeStory({ riskTier: "R2_SENSITIVE" });
+    expect(renderIssueTitle(sensitive, undefined, "கைது")).toBe(`[R2] கைது (${sensitive.topic})`);
   });
 
   it("asks for /approve-sensitive and the checklist on R2 stories", () => {
