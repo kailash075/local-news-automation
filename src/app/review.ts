@@ -37,8 +37,11 @@ export type ReviewDeps = {
   dispatch: WorkflowDispatcher;
 };
 
-/** `reply` is posted back on the issue; undefined means stay silent (for example, a non-editor). */
-export type ReviewResult = { reply?: string; dispatched: readonly string[] };
+/**
+ * `reply` is posted back on the issue; undefined means stay silent (for example, a non-editor). `reopen`: an expired
+ * story is back in review, so its closed issue opens again.
+ */
+export type ReviewResult = { reply?: string; dispatched: readonly string[]; reopen?: true };
 
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
@@ -141,10 +144,20 @@ export const handleComment = async (deps: ReviewDeps, input: CommentInput): Prom
 
   // A new caption or headline becomes a new revision in draft.yml, which re-renders the card.
   if (command.kind === "caption" || command.kind === "headline") {
+    // An expired story comes back for review, with another 48 hours from this command (src/review/expiry.ts).
+    const revived = story.status === "expired";
+    if (revived) {
+      const back = transition(story, { type: "rereview", at: toIso(now) });
+      const saved = back.ok ? await deps.stores.stories.update(back.value, story.version) : back;
+      if (!saved.ok) return { reply: "The story changed at the same time; please repeat the command.", dispatched: [] };
+    }
     const started = await deps.dispatch("draft.yml", { story_id: story.id });
     return {
-      reply: started.ok ? "New revision requested; the card is being re-rendered. Earlier approvals no longer apply." : `Saved, but draft.yml could not be started: ${started.error}`,
+      reply:
+        (revived ? "The expired story is back in review. " : "") +
+        (started.ok ? "New revision requested; the card is being re-rendered. Earlier approvals no longer apply." : `Saved, but draft.yml could not be started: ${started.error}`),
       dispatched: started.ok ? ["draft.yml"] : [],
+      ...(revived ? { reopen: true as const } : {}),
     };
   }
 

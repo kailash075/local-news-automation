@@ -99,8 +99,11 @@ stateDiagram-v2
   on_hold --> in_review: /unhold
   in_review --> rejected: /reject
   approved --> in_review: new revision cancels approval
-  approved --> expired: approval older than TTL
-  expired --> in_review: re-review
+  awaiting_caption --> expired: 48 h without approval, or notice day over
+  in_review --> expired: 48 h without approval, or notice day over
+  on_hold --> expired: 48 h without approval, or notice day over
+  approved --> expired: approval older than TTL, or notice day over
+  expired --> in_review: new /caption or /headline (not for a notice whose day is over)
   approved --> scheduled: publication queued
   scheduled --> published
   scheduled --> publish_failed
@@ -273,6 +276,7 @@ Authorisation and safety:
 - The commenter's login must be in `EDITOR_GITHUB_LOGINS`, and `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR`.
 - An approval binds to the **revision hash**, which is SHA-256 over the canonical JSON of story ID, revision number, headline, caption, hashtags, alt text, template version, render SHA-256 and source list. Editors type the first 12 hex characters; the full hash is stored.
 - Approvals expire after `APPROVAL_TTL_HOURS` (default 12), so stale news needs a fresh look.
+- Stories expire when they wait 48 hours without approval (counted from arrival or from the editor's latest command), or when a notice's stated day is over (`src/review/expiry.ts`). Every `draft` run, including the cheap scheduled check, expires them with one Sheet write, notes why on the issue, and closes it as "not planned". A new `/caption` or `/headline` on an expired story brings it back to review and reopens the issue; commands that lead to a post are refused for a notice whose day is over.
 - Comment bodies are untrusted input. Workflows pass them to the TypeScript parser through an environment variable and never interpolate `${{ github.event.comment.body }}` into a shell script, which would allow script injection.
 - Each processed comment ID is stored with a unique constraint, so a redelivered event cannot create a second decision.
 
@@ -293,7 +297,7 @@ Gates, all evaluated before container creation **and again immediately before `m
 2. An approval exists for the exact current revision hash, is not superseded, is younger than the TTL, and came from an allowlisted editor. R2 stories need `/approve-sensitive`.
 3. The verification level meets the minimum for the risk tier.
 4. The validation report passes; the JPEG's SHA-256 matches the approved render.
-5. The story has not been published already, and no near-duplicate was published in the last 7 days unless an editor overrode the check.
+5. The story has not been published already, it is not a notice whose stated day is over, and no near-duplicate was published in the last 7 days unless an editor overrode the check.
 6. Inside the posting window; minimum spacing since the previous post; under the daily cap; the live `content_publishing_limit` shows headroom.
 7. A token exists, is not expired, and the last health check passed.
 

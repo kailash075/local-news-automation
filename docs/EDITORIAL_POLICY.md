@@ -131,6 +131,7 @@ The software's tier is a floor. AI suggestions can only raise it. An editor may 
 - R2 and disputed stories need `/approve-sensitive <rev>`. Plain `/approve` is refused.
 - An approval applies to one exact revision. Any change to the caption, headline, graphic or sources creates a new revision that needs a new approval.
 - Approvals expire after 12 hours (configurable). Old news gets a fresh look.
+- Stories not approved within 48 hours expire, and their review issues close. A notice expires once its stated day is over and is never posted after that.
 - When a second editor is available, the owner may require two approvals for the most serious R2 categories (sexual offences, children, communal incidents, deaths).
 - Before approving an R2 story, the editor goes through the checklist in §14.
 

@@ -309,6 +309,29 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
       expect(issues.has(none.id)).toBe(false);
       expect((await s.reviewThreads.issueNumbersFor([])).size).toBe(0);
     });
+
+    it("update many stories with optimistic concurrency, one answer per change in order", async () => {
+      const one = makeStory(h.clock.now(), { status: "in_review" });
+      h.clock.advance(1);
+      const two = makeStory(h.clock.now(), { status: "in_review" });
+      await s.stories.insertMany([one, two]);
+      await s.stories.update({ ...two, priority: 3 }, 0);
+      const ghost = { ...one, id: StoryIdSchema.parse(uuidv7()) };
+
+      const answers = await s.stories.updateMany([
+        { story: { ...one, status: "expired" }, expectedVersion: 0 },
+        { story: { ...two, status: "expired" }, expectedVersion: 0 },
+        { story: ghost, expectedVersion: 0 },
+      ]);
+      expect(answers).toEqual([
+        { ok: true, value: expect.objectContaining({ id: one.id, status: "expired", version: 1 }) as unknown },
+        { ok: false, error: "version_conflict" },
+        { ok: false, error: "not_found" },
+      ]);
+      expect((await s.stories.get(one.id))?.status).toBe("expired");
+      expect(await s.stories.get(two.id)).toMatchObject({ status: "in_review", priority: 3, version: 1 });
+      expect(await s.stories.updateMany([])).toEqual([]);
+    });
   });
 
   describe("publications", () => {

@@ -136,6 +136,16 @@ describe("approvals bind to one exact revision", () => {
     expect(w.meta.writes()).toHaveLength(0);
   });
 
+  it.each(["approved", "scheduled"] as const)("a notice whose day is over is never published, and the %s story expires", async (status) => {
+    const w = await world({ story: { status, topic: "power_cut", expiresAt: toIso(new Date("2026-10-29T18:29:59.999Z")) } });
+    const outcome = await publishOne(w.deps);
+    expect(outcome).toMatchObject({ kind: "blocked", cancelled: true });
+    if (outcome.kind === "blocked") expect(outcome.reasons.map((r) => r.code)).toEqual(["notice_expired"]);
+    expect(w.publications.rows.get(w.publication.id)?.status).toBe("cancelled");
+    expect(w.stories.rows.get(w.story.id)?.status).toBe("expired");
+    expect(w.meta.writes()).toHaveLength(0);
+  });
+
   it("an R2 story approved with plain /approve is not published", async () => {
     const w = await world({ story: { riskTier: "R2_SENSITIVE" } });
     const outcome = await publishOne(w.deps);

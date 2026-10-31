@@ -11,6 +11,7 @@ import {
   type Source,
   type SourceItem,
   type Story,
+  type StoryId,
   type StoryStatus,
 } from "../domain/types.ts";
 import { deriveVerificationLevel } from "../domain/verification.ts";
@@ -19,6 +20,7 @@ import type { RenderError, Renderer } from "../graphics/render.ts";
 import { TEMPLATE_VERSION, type CardInput } from "../graphics/templates.ts";
 import type { IssuesClient } from "../github/issues.ts";
 import { toIso } from "../publishing/ist.ts";
+import { expiryNote, reviewExpiry, type ExpiryReason } from "../review/expiry.ts";
 import { renderIssueBody, renderIssueTitle, storyMarker, type IssueSource } from "../review/issue-body.ts";
 import { revisionHash } from "../review/revision-hash.ts";
 
@@ -27,12 +29,14 @@ export type DraftDeps = {
   clock: Clock;
   sourceFor: (id: string) => Source | undefined;
   objects: Pick<ObjectStore, "put" | "publicUrl">;
-  issues: Pick<IssuesClient, "create" | "update" | "comment" | "findByMarker">;
+  issues: Pick<IssuesClient, "create" | "update" | "comment" | "close" | "findByMarker">;
   /** Started lazily: Chromium is launched only when a card has to be rendered. */
   renderer: () => Promise<Renderer>;
 };
 
 export const ACTIVE_STATUSES: readonly StoryStatus[] = ["awaiting_caption", "in_review", "approved"];
+/** Stories with an open review issue: the active ones, and held ones, which can still expire. */
+const OPEN_STATUSES: readonly StoryStatus[] = [...ACTIVE_STATUSES, "on_hold"];
 const STORY_LABEL = "story";
 
 type CaptionRequest = { headlineTa: string; factLines: readonly string[]; requestedAt: string };
@@ -91,30 +95,85 @@ const describeRenderError = (e: RenderError): string => {
   }
 };
 
+type Expiry = { open: readonly Story[]; expired: number; problems: readonly string[] };
+
 /**
- * Work for the Chromium job: stories that need a new revision or still have no review issue. With `refreshIssues`,
- * every active story counts, because its issue is rewritten. A fixed number of Sheet reads, however many stories are open.
+ * Stories that waited too long for an editor expire (src/review/expiry.ts), and their review issues are closed with a
+ * short note. Works on data already read, and all expiries are one Sheet write. Returns the stories still open.
  */
-export const pendingDraftWork = async (deps: Pick<DraftDeps, "stores">, onlyStoryId?: string, refreshIssues = false): Promise<number> => {
-  const [unassigned, active] = await Promise.all([
+const expireWaiting = async (
+  deps: Pick<DraftDeps, "stores" | "clock" | "issues">,
+  stories: readonly Story[],
+  decisions: ReadonlyMap<StoryId, readonly EditorialDecision[]>,
+  issueNumbers: ReadonlyMap<StoryId, number>,
+): Promise<Expiry> => {
+  const now = deps.clock.now();
+  const due: { story: Story; reason: ExpiryReason; next: Story }[] = [];
+  for (const story of stories) {
+    const reason = reviewExpiry(story, decisions.get(story.id) ?? [], now);
+    if (reason === undefined) continue;
+    const next = transition(story, { type: "expire", at: toIso(now) });
+    if (next.ok) due.push({ story, reason, next: next.value });
+  }
+  if (due.length === 0) return { open: stories, expired: 0, problems: [] };
+
+  const saved = await deps.stores.stories.updateMany(due.map((d) => ({ story: d.next, expectedVersion: d.story.version })));
+  const problems: string[] = [];
+  let expired = 0;
+  for (const [i, d] of due.entries()) {
+    // Changed meanwhile, for example by an editor's command: the next run looks again.
+    if (saved[i]?.ok !== true) continue;
+    expired += 1;
+    const issue = issueNumbers.get(d.story.id);
+    if (issue === undefined) continue;
+    const noted = await deps.issues.comment(issue, expiryNote(d.reason, d.story));
+    const closed = noted.ok ? await deps.issues.close(issue, "not_planned") : noted;
+    if (!closed.ok) problems.push(`${d.story.id}: expired, but issue #${issue} was not closed: ${closed.error}`);
+  }
+  const gone = new Set(due.map((d) => d.story.id));
+  return { open: stories.filter((s) => !gone.has(s.id)), expired, problems };
+};
+
+export type DraftCheck = {
+  /** Work for the Chromium job; 0 means it does not start. */
+  pending: number;
+  expired: number;
+  problems: readonly string[];
+};
+
+/**
+ * The scheduled run's cheap check. It first expires stories that waited too long for an editor, then counts the work for
+ * the Chromium job: stories that need a new revision or still have no review issue. With `refreshIssues`, every active
+ * story counts, because its issue is rewritten. A fixed number of Sheet reads, however many stories are open.
+ */
+export const pendingDraftWork = async (
+  deps: Pick<DraftDeps, "stores" | "clock" | "issues">,
+  onlyStoryId?: string,
+  refreshIssues = false,
+): Promise<DraftCheck> => {
+  const [unassigned, listed] = await Promise.all([
     deps.stores.sourceItems.listUnassigned(1),
-    deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100),
+    deps.stores.stories.listByStatus(OPEN_STATUSES, 100),
   ]);
-  const stories = active.filter((s) => onlyStoryId === undefined || s.id === onlyStoryId);
-  if (onlyStoryId !== undefined || refreshIssues) return unassigned.length + stories.length;
-  const ids = stories.map((s) => s.id);
+  const candidates = listed.filter((s) => onlyStoryId === undefined || s.id === onlyStoryId);
+  const ids = candidates.map((s) => s.id);
   const [decisions, drafts, issues] = await Promise.all([
     deps.stores.decisions.listForStories(ids),
     deps.stores.drafts.latestForStories(ids),
     deps.stores.reviewThreads.issueNumbersFor(ids),
   ]);
-  const waiting = stories.filter((story) => {
-    const request = captionRequest(decisions.get(story.id) ?? []);
-    const draft = drafts.get(story.id);
-    const needsRevision = request !== undefined && (draft === undefined || request.requestedAt > draft.createdAt);
-    return needsRevision || !issues.has(story.id);
-  });
-  return unassigned.length + waiting.length;
+  const { open, expired, problems } = await expireWaiting(deps, candidates, decisions, issues);
+  const stories = open.filter((s) => ACTIVE_STATUSES.includes(s.status));
+  const waiting =
+    onlyStoryId !== undefined || refreshIssues
+      ? stories
+      : stories.filter((story) => {
+          const request = captionRequest(decisions.get(story.id) ?? []);
+          const draft = drafts.get(story.id);
+          const needsRevision = request !== undefined && (draft === undefined || request.requestedAt > draft.createdAt);
+          return needsRevision || !issues.has(story.id);
+        });
+  return { pending: unassigned.length + waiting.length, expired, problems };
 };
 
 const buildRevision = async (
@@ -188,17 +247,19 @@ export type DraftReport = {
   issuesUpdated: number;
   /** Stories still without a review issue because this run reached MAX_NEW_ISSUES_PER_RUN. */
   deferred: number;
+  /** Stories that waited too long for an editor; their issues were closed. */
+  expired: number;
   problems: readonly string[];
 };
 
 /** `refreshIssues` rewrites the title and body of every active story's issue, for example after a template change. */
 export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIssues = false): Promise<DraftReport> => {
-  const report = { revisions: 0, issuesCreated: 0, issuesUpdated: 0, deferred: 0, problems: [] as string[] };
-  const stories = (await deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100)).filter(
+  const report = { revisions: 0, issuesCreated: 0, issuesUpdated: 0, deferred: 0, expired: 0, problems: [] as string[] };
+  const listed = (await deps.stores.stories.listByStatus(OPEN_STATUSES, 100)).filter(
     (s) => onlyStoryId === undefined || s.id === onlyStoryId,
   );
   // Everything the loop needs, read once for all stories: the Sheet cost stays flat as stories pile up.
-  const ids = stories.map((s) => s.id);
+  const ids = listed.map((s) => s.id);
   const [issueNumbers, decisionsByStory, itemsByStory, drafts, evidenceByStory] = await Promise.all([
     deps.stores.reviewThreads.issueNumbersFor(ids),
     deps.stores.decisions.listForStories(ids),
@@ -206,6 +267,10 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIs
     deps.stores.drafts.latestForStories(ids),
     deps.stores.evidence.listForStories(ids),
   ]);
+  const expiry = await expireWaiting(deps, listed, decisionsByStory, issueNumbers);
+  report.expired = expiry.expired;
+  report.problems.push(...expiry.problems);
+  const stories = expiry.open.filter((s) => ACTIVE_STATUSES.includes(s.status));
 
   // Highest priority first (power cuts lead), then the newest.
   const order = (a: Story, b: Story): number => b.priority - a.priority || Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt);

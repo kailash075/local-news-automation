@@ -124,7 +124,7 @@ const withoutContainer = (p: Publication): Publication => {
   return copy;
 };
 
-const TERMINAL_GATES: ReadonlySet<GateCode> = new Set(["superseded", "already_published", "approval_expired", "story_state"]);
+const TERMINAL_GATES: ReadonlySet<GateCode> = new Set(["superseded", "already_published", "approval_expired", "notice_expired", "story_state"]);
 const OPERATIONAL_GATES: ReadonlySet<GateCode> = new Set([
   "not_live",
   "paused",
@@ -279,7 +279,7 @@ export const publishOne = async (deps: PublisherDeps): Promise<PublishOutcome> =
     const cancelled = gates.reasons.some((r) => TERMINAL_GATES.has(r.code));
     if (cancelled) {
       await save(ctx, { ...ctx.pub, status: "cancelled", lastError: message });
-      if (gates.reasons.some((r) => r.code === "approval_expired")) await moveStory(ctx, ["expire"]);
+      if (gates.reasons.some((r) => r.code === "approval_expired" || r.code === "notice_expired")) await moveStory(ctx, ["expire"]);
     } else {
       const onlyOperational = gates.reasons.every((r) => OPERATIONAL_GATES.has(r.code));
       const retryAt = new Date(now.getTime() + (onlyOperational ? OPERATIONAL_RETRY_MS : HUMAN_RETRY_MS));

@@ -13,6 +13,7 @@ import { meetsMinimum, minimumFor } from "../domain/verification.ts";
 import { assertNever, err, ok, type Result } from "../lib/result.ts";
 import { formatIst, insideWindow, nextIstTime, toIso, type PostingWindow } from "../publishing/ist.ts";
 import type { ReviewCommand } from "./commands.ts";
+import { noticePassed } from "./expiry.ts";
 import { shortHash } from "./revision-hash.ts";
 
 /** GitHub `author_association` values that may issue commands, in addition to the editor allowlist. */
@@ -53,7 +54,8 @@ export type RefusalKind =
   | "stale_revision"
   | "needs_sensitive_approval"
   | "insufficient_verification"
-  | "invalid_schedule";
+  | "invalid_schedule"
+  | "notice_passed";
 
 export type Refusal = {
   kind: RefusalKind;
@@ -61,6 +63,9 @@ export type Refusal = {
   /** False for commenters outside the allowlist: the attempt is recorded but not answered. */
   reply: boolean;
 };
+
+/** Commands that lead to a post, which a notice whose day is over can no longer have. */
+const TOWARD_POSTING: ReadonlySet<ReviewCommand["kind"]> = new Set(["caption", "headline", "approve", "approve_sensitive", "schedule"]);
 
 const refuse = (kind: RefusalKind, message: string): Result<never, Refusal> =>
   err({ kind, message, reply: kind !== "not_editor" });
@@ -96,7 +101,14 @@ export const authorise = (command: ReviewCommand, ctx: CommandContext): Result<A
   const needState = (event: StoryEventType): Result<AuthorisedCommand, Refusal> | undefined =>
     canTransition(story.status, event)
       ? undefined
-      : refuse("wrong_state", `/${command.kind.replace("_", "-")} is not possible while the story is ${story.status}.`);
+      : refuse(
+          "wrong_state",
+          `/${command.kind.replace("_", "-")} is not possible while the story is ${story.status}.${story.status === "expired" ? " A new /caption brings it back for review." : ""}`,
+        );
+
+  if (TOWARD_POSTING.has(command.kind) && noticePassed(story, ctx.now)) {
+    return refuse("notice_passed", "This notice's day is over, so it can no longer be posted.");
+  }
 
   switch (command.kind) {
     case "killswitch_on":

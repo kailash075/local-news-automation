@@ -27,12 +27,12 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 | Separate workflows for collect, write and post, each with its own concurrency group | `collect.yml`, `draft.yml`, `publish.yml`, each with its own concurrency group |
 | The collector starts the writer when there is news, instead of waiting for the next schedule | `collect.yml` starts `draft.yml` only when new items arrived |
 | Watchdog, because GitHub sometimes skips scheduled runs | `draft.yml` keeps a 4-hourly safety-net schedule; every job can be rerun safely |
-| A cheap check job before the expensive one (`post.yml`) | A scheduled `draft.yml` run checks first and starts the Chromium job only when there is work. Runs started by `collect` or `review-command` skip the check, because they always have work. |
+| A cheap check job before the expensive one (`post.yml`) | A scheduled `draft.yml` run checks first and starts the Chromium job only when there is work. The check also expires old stories itself, so expiry never starts Chromium. Runs started by `collect` or `review-command` skip the check, because they always have work. |
 | One-click pause and start (`collect-switch`, `LIVE` file, `PAUSED` variable) | The same three switches, used the same way. See §4. |
 | Manual runs of the poster are test-only by default (`dry_run`) | `publish.yml` and `collect.yml` manual runs are dry runs unless you untick the box |
 | "Setup not finished" exit when secrets are missing | Every job checks its configuration and exits cleanly with a clear message |
 | Priority: power cut > crime > accident > civic > the rest | Topic priority with power cuts first (`src/pipeline/topic.ts`). Crime and accidents are flagged sensitive, so an editor decides. |
-| Only today's news; finished power cuts and passed dates are skipped | Stale and expired stories are never drafted or published (`src/pipeline/freshness.ts`) |
+| Only today's news; finished power cuts and passed dates are skipped | Stale and expired stories are never drafted or published (`src/pipeline/freshness.ts`). Stories not approved within 48 hours, and notices whose day is over, expire and their review issues close (`src/review/expiry.ts`); the publisher checks the notice date again before posting. |
 | Neighbour districts are rejected even when close; a story naming both a Coimbatore place and a neighbour is kept | Same rule with an Erode gazetteer and a neighbour list (Tiruppur, Coimbatore, Salem, Namakkal, Karur, Nilgiris, Chamarajanagar) |
 | Same event from two outlets is posted once | MinHash near-duplicate clustering, plus a check against everything published in the last 7 days |
 | Reads Instagram's live `content_publishing_limit` before posting | Same, and our own cap is far lower (6 a day) |

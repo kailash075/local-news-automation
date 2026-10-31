@@ -43,7 +43,13 @@ Measured durations (filled in during Phase 0 and Phase 1):
 3. Act with commands: `/caption`, `/attest`, `/approve <rev>`, `/approve-sensitive <rev>`, `/schedule <rev> <HH:MM>`, `/hold`, `/reject`.
 4. Check the daily digest issue for failures, alerts and the publishing log.
 
-Targets: R0 notices reviewed within 2 hours during the posting window, so the information is still useful; everything else on the same day. Stories not approved within 48 hours expire automatically.
+Targets: R0 notices reviewed within 2 hours during the posting window, so the information is still useful; everything else on the same day.
+
+Expiry (`src/review/expiry.ts`, checked by every `draft` run; while automatic collecting is paused, the scheduled runs stop, so nothing expires until the next run):
+
+- A story not approved within **48 hours** expires: the bot writes a short note on its issue and closes it as "not planned". Each editor command on the story (for example `/caption` or `/hold`) starts the 48 hours again.
+- A notice (power cut, water supply, traffic, weather, jobs) expires as soon as its stated day is over. It cannot be approved, captioned or posted after that, and the publisher checks the date again just before posting.
+- To bring back an expired story that is still news, comment a new `/caption` on its closed issue. The issue reopens and the story is back in review with another 48 hours. This does not work for a notice whose day is over.
 
 ## 4. Kill switch
 

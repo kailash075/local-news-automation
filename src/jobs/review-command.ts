@@ -27,6 +27,10 @@ await runJob("review-command", async ({ env, stores, clock, count }) => {
     { body: e.COMMENT_BODY, commentId: e.COMMENT_ID, author: e.COMMENT_AUTHOR, authorAssociation: e.AUTHOR_ASSOCIATION, issueNumber: e.ISSUE_NUMBER },
   );
   count("commands");
+  if (result.reopen === true) {
+    const reopened = await issues.reopen(e.ISSUE_NUMBER);
+    if (!reopened.ok) log.warn("could not reopen the issue", { error: reopened.error });
+  }
   if (result.reply !== undefined) {
     const posted = await issues.comment(e.ISSUE_NUMBER, result.reply);
     if (!posted.ok) log.warn("could not reply on the issue", { error: posted.error });

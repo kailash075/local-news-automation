@@ -1,4 +1,4 @@
-import { err, ok } from "../../src/lib/result.ts";
+import { err, ok, type Result } from "../../src/lib/result.ts";
 import type {
   Clock,
   InstagramCredentials,
@@ -90,6 +90,15 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
     return Promise.resolve();
   };
 
+  const updateStory = (story: Story, expectedVersion: number): Result<Story, "version_conflict" | "not_found"> => {
+    const current = storyMap.get(story.id);
+    if (current === undefined) return err("not_found");
+    if (current.version !== expectedVersion) return err("version_conflict");
+    const next: Story = { ...clone(story), firstSeenAt: current.firstSeenAt, version: expectedVersion + 1 };
+    storyMap.set(story.id, next);
+    return ok(clone(next));
+  };
+
   const latestDraft = (storyId: StoryId): DraftRevision | undefined =>
     [...draftMap.values()].filter((d) => d.storyId === storyId).sort((a, b) => b.revision - a.revision)[0];
 
@@ -171,14 +180,8 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
         return Promise.resolve();
       },
       get: (id) => Promise.resolve(storyMap.has(id) ? clone(storyMap.get(id)) : undefined),
-      update: (story, expectedVersion) => {
-        const current = storyMap.get(story.id);
-        if (current === undefined) return Promise.resolve(err("not_found" as const));
-        if (current.version !== expectedVersion) return Promise.resolve(err("version_conflict" as const));
-        const next: Story = { ...clone(story), firstSeenAt: current.firstSeenAt, version: expectedVersion + 1 };
-        storyMap.set(story.id, next);
-        return Promise.resolve(ok(clone(next)));
-      },
+      update: (story, expectedVersion) => Promise.resolve(updateStory(story, expectedVersion)),
+      updateMany: (changes) => Promise.resolve(changes.map((c) => updateStory(c.story, c.expectedVersion))),
       listByStatus: (statuses, limit) =>
         Promise.resolve(
           [...storyMap.values()]

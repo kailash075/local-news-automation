@@ -93,6 +93,18 @@ describe("story lifecycle", () => {
     expect(transition(unknown, { type: "reconciled_not_published", at }).ok).toBe(true);
   });
 
+  it("a story waiting for an editor, approved or scheduled can expire, and an expired one comes back to review", () => {
+    for (const status of ["awaiting_caption", "in_review", "on_hold", "approved", "scheduled"] as const) {
+      const next = transition(makeStory({ status }), { type: "expire", at });
+      expect(next.ok && next.value.status, status).toBe("expired");
+    }
+    for (const status of ["collected", "published", "rejected", "discarded", "publish_unknown"] as const) {
+      expect(canTransition(status, "expire"), status).toBe(false);
+    }
+    const back = transition(makeStory({ status: "expired" }), { type: "rereview", at });
+    expect(back.ok && back.value.status).toBe("in_review");
+  });
+
   it("an unhold returns the story to review, so it needs a fresh approval", () => {
     const held = transition(makeStory({ status: "approved" }), { type: "hold", at });
     expect(held.ok && held.value.status).toBe("on_hold");

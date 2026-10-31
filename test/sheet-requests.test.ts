@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runCollect } from "../src/app/collect.ts";
-import { pendingDraftWork, runDrafts } from "../src/app/draft.ts";
+import { pendingDraftWork, runDrafts, type DraftDeps } from "../src/app/draft.ts";
 import { runTriage } from "../src/app/triage.ts";
 import type { FetchLike } from "../src/collectors/http.ts";
 import { ok } from "../src/lib/result.ts";
@@ -14,7 +14,16 @@ import { freshSheet, type TestSheet } from "./support/sheet.ts";
  * pin the number of Sheet requests: it must not grow with the number of stories, items or sources.
  */
 
-type Request = { op?: string; table?: string };
+type Request = { op?: string; table?: string; ops?: readonly Request[] };
+
+/** GitHub must not be touched while nothing expires. */
+const noGitHub: DraftDeps["issues"] = {
+  create: () => Promise.reject(new Error("unexpected")),
+  update: () => Promise.reject(new Error("unexpected")),
+  comment: () => Promise.reject(new Error("unexpected")),
+  close: () => Promise.reject(new Error("unexpected")),
+  findByMarker: () => Promise.resolve(ok(undefined)),
+};
 
 const requestsDuring = async (t: TestSheet, run: () => Promise<unknown>): Promise<readonly Request[]> => {
   const before = t.google.requests.length;
@@ -34,12 +43,38 @@ const paper = testSource({ trustTier: "T2_established_publisher" });
 describe("Sheet requests do not grow with the number of open stories", () => {
   it("draft check", async () => {
     const t = await freshSheet();
+    const deps = { stores: t.stores, clock: t.clock, issues: noGitHub };
     await openStories(t, 2);
-    const few = await requestsDuring(t, () => pendingDraftWork({ stores: t.stores }));
+    const few = await requestsDuring(t, () => pendingDraftWork(deps));
     await openStories(t, 6);
-    const many = await requestsDuring(t, () => pendingDraftWork({ stores: t.stores }));
+    const many = await requestsDuring(t, () => pendingDraftWork(deps));
     expect(many).toHaveLength(few.length);
     expect(few.length).toBeLessThanOrEqual(5);
+  });
+
+  it("draft check that expires stories: one Sheet write for all of them", async () => {
+    const t = await freshSheet();
+    const closed: number[] = [];
+    const issues: DraftDeps["issues"] = {
+      ...noGitHub,
+      comment: () => Promise.resolve(ok(undefined)),
+      close: (n) => {
+        closed.push(n);
+        return Promise.resolve(ok(undefined));
+      },
+    };
+    const deps = { stores: t.stores, clock: t.clock, issues };
+    await openStories(t, 2);
+    t.clock.advance(49 * 3_600_000);
+    const few = await requestsDuring(t, () => pendingDraftWork(deps));
+    await openStories(t, 6);
+    t.clock.advance(49 * 3_600_000);
+    const many = await requestsDuring(t, () => pendingDraftWork(deps));
+    expect(many).toHaveLength(few.length);
+    expect(many.filter((r) => r.op === "batch")).toHaveLength(1);
+    expect(many.find((r) => r.op === "batch")?.ops).toHaveLength(6);
+    expect(closed).toHaveLength(8);
+    expect(await t.stores.stories.listByStatus(["expired"], 100)).toHaveLength(8);
   });
 
   it("draft run with nothing new to draft", async () => {
@@ -49,12 +84,7 @@ describe("Sheet requests do not grow with the number of open stories", () => {
       clock: t.clock,
       sourceFor: () => paper,
       objects: { put: () => Promise.reject(new Error("unexpected")), publicUrl: () => Promise.reject(new Error("unexpected")) },
-      issues: {
-        create: () => Promise.reject(new Error("unexpected")),
-        update: () => Promise.reject(new Error("unexpected")),
-        comment: () => Promise.reject(new Error("unexpected")),
-        findByMarker: () => Promise.resolve(ok(undefined)),
-      },
+      issues: noGitHub,
       renderer: () => Promise.reject(new Error("unexpected")),
     };
     await openStories(t, 2);

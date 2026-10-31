@@ -13,6 +13,7 @@ import type {
   SourceItemStore,
   SourceStateStore,
   StoryAttachment,
+  StoryChange,
   Stores,
   StoryStore,
   SwitchKey,
@@ -520,6 +521,11 @@ const createSourceItemStore = (bridge: BridgeClient, clock: Clock): SourceItemSt
   };
 };
 
+/** Story updates per bridge batch: one operation each, and the bridge runs at most 50 a batch. */
+const STORY_UPDATES_PER_BATCH = 50;
+
+type StoryUpdateResult = Result<Story, "version_conflict" | "not_found">;
+
 const createStoryStore = (bridge: BridgeClient): StoryStore => {
   const table = TABLES.stories.name;
   const insertMany = async (stories: readonly Story[]): Promise<void> => {
@@ -528,6 +534,18 @@ const createStoryStore = (bridge: BridgeClient): StoryStore => {
     const clash = stories.find((_, i) => inserted[i] !== true);
     if (clash !== undefined) throw new Error(`story ${clash.id} already exists`);
   };
+  /** Every cell but the id and the first sighting, with the version moved on. */
+  const cellsFor = ({ story, expectedVersion }: StoryChange): Row => {
+    const next: Row = { ...storyRow(story), version: String(expectedVersion + 1) };
+    return Object.fromEntries(Object.entries(next).filter(([c]) => c !== "id" && c !== "first_seen_at"));
+  };
+  /** The compare-and-set matched no row: missing, changed by someone else, or already written by us. */
+  const afterMiss = (current: Row | undefined, set: Row): StoryUpdateResult => {
+    if (current === undefined) return err("not_found");
+    // Our own earlier request, whose answer was lost, already wrote exactly this.
+    if (Object.entries(set).every(([c, v]) => cellOf(current, c) === v)) return ok(storyFromRow(current));
+    return err("version_conflict");
+  };
   return {
     insert: (story) => insertMany([story]),
     insertMany,
@@ -535,16 +553,34 @@ const createStoryStore = (bridge: BridgeClient): StoryStore => {
       const [row] = await bridge.select(table, { id });
       return row === undefined ? undefined : storyFromRow(row);
     },
-    update: async (story, expectedVersion): Promise<Result<Story, "version_conflict" | "not_found">> => {
-      const next: Row = { ...storyRow(story), version: String(expectedVersion + 1) };
-      const set = Object.fromEntries(Object.entries(next).filter(([c]) => c !== "id" && c !== "first_seen_at"));
+    update: async (story, expectedVersion): Promise<StoryUpdateResult> => {
+      const set = cellsFor({ story, expectedVersion });
       const [row] = await bridge.update(table, { id: story.id, version: String(expectedVersion) }, set);
       if (row !== undefined) return ok(storyFromRow(row));
       const [current] = await bridge.select(table, { id: story.id });
-      if (current === undefined) return err("not_found");
-      // Our own earlier request, whose answer was lost, already wrote exactly this.
-      if (Object.entries(set).every(([c, v]) => cellOf(current, c) === v)) return ok(storyFromRow(current));
-      return err("version_conflict");
+      return afterMiss(current, set);
+    },
+    updateMany: async (changes) => {
+      const results: StoryUpdateResult[] = [];
+      for (let i = 0; i < changes.length; i += STORY_UPDATES_PER_BATCH) {
+        const chunk = changes.slice(i, i + STORY_UPDATES_PER_BATCH);
+        const sets = chunk.map(cellsFor);
+        const answers = await bridge.batch(
+          chunk.map(({ story, expectedVersion }, j) => ({
+            op: "update" as const,
+            table,
+            where: { id: story.id, version: String(expectedVersion) },
+            set: sets[j] ?? {},
+          })),
+        );
+        const missed = chunk.filter((_, j) => answers[j]?.[0] === undefined).map((c) => c.story.id);
+        const current = missed.length === 0 ? [] : await bridge.select(table, { id: missed });
+        chunk.forEach(({ story }, j) => {
+          const row = answers[j]?.[0];
+          results.push(row === undefined ? afterMiss(current.find((r) => cellOf(r, "id") === story.id), sets[j] ?? {}) : ok(storyFromRow(row)));
+        });
+      }
+      return results;
     },
     listByStatus: async (statuses, limit) => {
       if (statuses.length === 0) return [];

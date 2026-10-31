@@ -14,6 +14,7 @@ export type IssuesClient = {
   update: (issueNumber: number, title: string, body: string) => Promise<Result<void, string>>;
   comment: (issueNumber: number, body: string) => Promise<Result<void, string>>;
   close: (issueNumber: number, reason: "completed" | "not_planned") => Promise<Result<void, string>>;
+  reopen: (issueNumber: number) => Promise<Result<void, string>>;
   /** Fallback when the database lost the issue number: scans recent issues with the label for a hidden marker. */
   findByMarker: (label: string, marker: string) => Promise<Result<IssueRef | undefined, string>>;
 };
@@ -86,6 +87,10 @@ export const createIssuesClient = (options: {
     },
     close: async (issueNumber, reason) => {
       const res = await call("PATCH", `/issues/${issueNumber}`, { state: "closed", state_reason: reason });
+      return res.ok ? ok(undefined) : res;
+    },
+    reopen: async (issueNumber) => {
+      const res = await call("PATCH", `/issues/${issueNumber}`, { state: "open" });
       return res.ok ? ok(undefined) : res;
     },
     findByMarker: async (label, marker) => {

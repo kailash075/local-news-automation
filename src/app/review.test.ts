@@ -6,6 +6,7 @@ import { loadEnv } from "../config/env.ts";
 import { uuidv7 } from "../lib/ids.ts";
 import { SourceItemIdSchema, type Story } from "../domain/types.ts";
 import { ok } from "../lib/result.ts";
+import { toIso } from "../publishing/ist.ts";
 import { shortHash } from "../review/revision-hash.ts";
 import { handleComment, type CommentInput, type ReviewDeps } from "./review.ts";
 
@@ -127,6 +128,28 @@ describe("review desk", () => {
     const t = await setup();
     const result = await t.say("/caption\nஈரோட்டில் நாளை காலை 9 மணி முதல் மின்தடை.");
     expect(result.reply).toContain("New revision");
+    expect(result.reopen).toBeUndefined();
     expect(t.dispatched).toEqual(["draft.yml"]);
+  });
+
+  it("brings an expired story back for review with a new /caption, and reopens its issue", async () => {
+    const t = await setup({ status: "expired" });
+    const approve = await t.say(`/approve ${shortHash(t.draft.revisionHash)}`);
+    expect(approve.reply).toBe("Refused: /approve is not possible while the story is expired. A new /caption brings it back for review.");
+
+    const result = await t.say("/caption\nஈரோட்டில் நாளை காலை 9 மணி முதல் மின்தடை.");
+    expect(result).toMatchObject({ reopen: true, dispatched: ["draft.yml"] });
+    expect(result.reply).toContain("back in review");
+    expect((await t.stores.stories.get(t.story.id))?.status).toBe("in_review");
+  });
+
+  it("refuses captions and approvals for a notice whose day is over", async () => {
+    const t = await setup({ expiresAt: toIso(new Date("2026-10-29T18:29:59.999Z")) }); // the end of 29 October, IST
+    for (const body of [`/approve ${shortHash(t.draft.revisionHash)}`, "/caption\nநேற்றைய மின்தடை", "/headline நேற்றைய மின்தடை"]) {
+      expect((await t.say(body)).reply).toBe("Refused: This notice's day is over, so it can no longer be posted.");
+    }
+    expect(t.dispatched).toEqual([]);
+    expect((await t.stores.stories.get(t.story.id))?.status).toBe("in_review");
+    expect((await t.say("/reject old notice")).reply).toContain("Rejected");
   });
 });

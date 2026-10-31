@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NEW_ISSUES_PER_RUN, pendingDraftWork, runDrafts, type DraftDeps } from "../src/app/draft.ts";
-import type { IssueRef, IssuesClient } from "../src/github/issues.ts";
+import type { IssueRef } from "../src/github/issues.ts";
 import { ok } from "../src/lib/result.ts";
 import { testClock } from "./support/clock.ts";
 import type { StoryId } from "../src/domain/types.ts";
@@ -13,7 +13,7 @@ const setup = () => {
   const clock = testClock();
   const stores = createMemoryStores(clock);
   const created: IssueRef[] = [];
-  const issues: Pick<IssuesClient, "create" | "update" | "comment" | "findByMarker"> = {
+  const issues: DraftDeps["issues"] = {
     create: (title, body) => {
       const ref: IssueRef = { number: created.length + 1, title, body, state: "open" };
       created.push(ref);
@@ -25,6 +25,7 @@ const setup = () => {
       return Promise.resolve(ok(undefined));
     },
     comment: () => Promise.resolve(ok(undefined)),
+    close: () => Promise.resolve(ok(undefined)),
     findByMarker: () => Promise.resolve(ok(undefined)),
   };
   const source = testSource();
@@ -78,7 +79,7 @@ describe("runDrafts refresh", () => {
 
     const before = created.map((i) => i.body);
     created.forEach((issue, index) => (created[index] = { ...issue, title: "old title", body: "old body" }));
-    expect(await pendingDraftWork({ stores }, undefined, true)).toBe(3);
+    expect(await pendingDraftWork(deps, undefined, true)).toMatchObject({ pending: 3, expired: 0 });
     expect(await runDrafts(deps, undefined, true)).toMatchObject({ issuesCreated: 0, issuesUpdated: 3 });
     expect(created.map((i) => i.body)).toEqual(before);
     expect(created.every((i) => i.title !== "old title")).toBe(true);

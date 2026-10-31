@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { actionFor, backoffMs, classifyError } from "../../src/publishing/errors.ts";
 import { evaluateGates, type GateInput } from "../../src/publishing/gates.ts";
 import { createInstagramClient, redact, type InstagramClientError } from "../../src/publishing/instagram-client.ts";
-import { formatIst, insideWindow, istMinuteOfDay, nextIstTime, startOfIstDay } from "../../src/publishing/ist.ts";
+import { formatIst, insideWindow, istMinuteOfDay, nextIstTime, startOfIstDay, toIso } from "../../src/publishing/ist.ts";
 import { approval, fakeMeta, fixtures, IG_USER_ID, json, makeDraft, makeStory, networkError, NOON_IST, RENDER_SHA, TOKEN } from "./fakes.ts";
 
 const client = (meta = fakeMeta()) => ({ meta, ig: createInstagramClient({ fetch: meta.fetch, accessToken: TOKEN, graphVersion: "v26.0" }) });
@@ -187,6 +187,8 @@ describe("gates", () => {
     expect(codes({ ...base, story: { ...story, status: "on_hold" } })).toContain("story_state");
     expect(codes({ ...base, decisions: [] })).toContain("no_approval");
     expect(codes({ ...base, editors: [] })).toContain("editor_not_allowed");
+    expect(codes({ ...base, story: { ...story, expiresAt: toIso(new Date(NOON_IST.getTime() - 1)) } })).toEqual(["notice_expired"]);
+    expect(codes({ ...base, story: { ...story, expiresAt: toIso(new Date(NOON_IST.getTime() + 1)) } })).toEqual([]);
   });
 
   it("in dry run, operational gates become notes but approval gates still block", () => {

@@ -82,12 +82,16 @@ export type SourceItemStore = {
 
 // ---------------------------------------------------------------- stories
 
+export type StoryChange = { story: Story; expectedVersion: number };
+
 export type StoryStore = {
   insert: (story: Story) => Promise<void>;
   insertMany: (stories: readonly Story[]) => Promise<void>;
   get: (id: StoryId) => Promise<Story | undefined>;
   /** Writes only when the stored version equals `expectedVersion`; the stored version becomes `expectedVersion + 1`. */
   update: (story: Story, expectedVersion: number) => Promise<Result<Story, "version_conflict" | "not_found">>;
+  /** `update` for many stories in one request; one answer per change, in the same order. */
+  updateMany: (changes: readonly StoryChange[]) => Promise<readonly Result<Story, "version_conflict" | "not_found">[]>;
   listByStatus: (statuses: readonly StoryStatus[], limit: number) => Promise<readonly Story[]>;
   /** Stories first seen at or after `since`, with their source items, for near-duplicate clustering. */
   listRecentWithItems: (since: IsoDateTime) => Promise<readonly { story: Story; items: readonly SourceItem[] }[]>;

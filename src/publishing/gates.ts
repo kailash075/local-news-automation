@@ -1,6 +1,8 @@
 import type { DraftRevision, EditorialDecision, GitHubLogin, Sha256Hex, Story, VerificationLevel } from "../domain/types.ts";
 import { meetsMinimum, minimumFor } from "../domain/verification.ts";
+import { istDateOf } from "../pipeline/freshness.ts";
 import { isApprovalExpired } from "../review/authorise.ts";
+import { noticePassed } from "../review/expiry.ts";
 import { formatIst, insideWindow, type PostingWindow } from "./ist.ts";
 
 /**
@@ -22,6 +24,7 @@ export type GateCode =
   | "validation"
   | "render_mismatch"
   | "already_published"
+  | "notice_expired"
   | "near_duplicate"
   | "outside_window"
   | "spacing"
@@ -125,8 +128,13 @@ export const evaluateGates = (input: GateInput): GateResult => {
     reasons.push({ code: "render_mismatch", message: "stored graphic does not match the approved render" });
   }
 
-  // 5. Not published already; no near-duplicate in the last 7 days unless an editor overrode the check.
+  // 5. Not published already; not a notice whose day is over (a power cut that has ended); no near-duplicate in the last
+  // 7 days unless an editor overrode the check.
   if (input.alreadyPublished) reasons.push({ code: "already_published", message: "this story has already been published" });
+  if (noticePassed(story, now) && story.expiresAt !== undefined) {
+    const d = istDateOf(new Date(story.expiresAt));
+    reasons.push({ code: "notice_expired", message: `the notice was for ${d.day}.${d.month}.${d.year}, and that day is over` });
+  }
   if (input.nearDuplicate.found && !input.nearDuplicate.overriddenByEditor) {
     reasons.push({ code: "near_duplicate", message: `a similar post was published recently${input.nearDuplicate.detail === undefined ? "" : `: ${input.nearDuplicate.detail}`}` });
   }

@@ -8,7 +8,7 @@ import { runTriage } from "../src/app/triage.ts";
 import { loadEnv } from "../src/config/env.ts";
 import { SOURCES } from "../src/config/sources.ts";
 import { SourceIdSchema, type Sha256Hex, type Source } from "../src/domain/types.ts";
-import type { IssueRef, IssuesClient } from "../src/github/issues.ts";
+import type { IssueRef } from "../src/github/issues.ts";
 import { renderObjectKey, type Renderer } from "../src/graphics/render.ts";
 import { ok } from "../src/lib/result.ts";
 import type { InstagramClient } from "../src/publishing/instagram-client.ts";
@@ -28,7 +28,7 @@ const sourceFor = (id: string): Source | undefined => sources.find((s) => s.id =
 const fakeIssues = () => {
   const issues = new Map<number, IssueRef>();
   const comments: string[] = [];
-  const client: Pick<IssuesClient, "create" | "update" | "comment" | "findByMarker"> = {
+  const client: DraftDeps["issues"] = {
     create: (title, body) => {
       const ref: IssueRef = { number: issues.size + 1, title, body, state: "open" };
       issues.set(ref.number, ref);
@@ -41,6 +41,11 @@ const fakeIssues = () => {
     },
     comment: (_n, body) => {
       comments.push(body);
+      return Promise.resolve(ok(undefined));
+    },
+    close: (n) => {
+      const existing = issues.get(n);
+      if (existing !== undefined) issues.set(n, { ...existing, state: "closed" });
       return Promise.resolve(ok(undefined));
     },
     findByMarker: () => Promise.resolve(ok(undefined)),
@@ -149,11 +154,11 @@ describe("Erode flow, Coimbatore 360 pattern with an editor in the loop", () => 
     };
 
     // First draft run: the review issue asks the editor for a caption.
-    expect(await pendingDraftWork({ stores })).toBe(1);
+    expect(await pendingDraftWork(deps)).toMatchObject({ pending: 1, expired: 0 });
     const first = await runDrafts(deps);
     expect(first).toMatchObject({ revisions: 0, issuesCreated: 1 });
     expect(gh.issues.get(1)?.body).toContain("/caption");
-    expect(await pendingDraftWork({ stores })).toBe(0);
+    expect(await pendingDraftWork(deps)).toMatchObject({ pending: 0, expired: 0 });
 
     const env = loadEnv({ EDITOR_GITHUB_LOGINS: "kailash075", OWNER_GITHUB_LOGIN: "kailash075" });
     let commentId = 500;

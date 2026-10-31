@@ -1,6 +1,6 @@
 # ErodeGlitz: Project Plan
 
-> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 357 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
+> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 376 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
 > Last updated: 2026-10-31. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
 
 ErodeGlitz is a Tamil-first Instagram page for local news from Erode city and Erode district, Tamil Nadu. This repository will hold an automated newsroom pipeline that:

@@ -26,7 +26,7 @@ import {
   type StoryId,
   type VerificationEvidence,
 } from "../../src/domain/types.ts";
-import { err, ok } from "../../src/lib/result.ts";
+import { err, ok, type Result } from "../../src/lib/result.ts";
 import { createInstagramClient, type FetchFn } from "../../src/publishing/instagram-client.ts";
 import { toIso } from "../../src/publishing/ist.ts";
 import { newPublication, type PublisherDeps, type PublisherEnv, type ReconcileDeps } from "../../src/publishing/publisher.ts";
@@ -248,6 +248,14 @@ export const memorySettings = (killSwitch: boolean): MemorySettings => {
 
 export const memoryStories = (initial: readonly Story[]): StoryStore & { rows: Map<StoryId, Story> } => {
   const rows = new Map(initial.map((s) => [s.id, s]));
+  const update = (story: Story, expectedVersion: number): Result<Story, "version_conflict" | "not_found"> => {
+    const current = rows.get(story.id);
+    if (current === undefined) return err("not_found");
+    if (current.version !== expectedVersion) return err("version_conflict");
+    const next = { ...story, version: expectedVersion + 1 };
+    rows.set(story.id, next);
+    return ok(next);
+  };
   return {
     rows,
     insert: (story) => {
@@ -259,14 +267,8 @@ export const memoryStories = (initial: readonly Story[]): StoryStore & { rows: M
       return Promise.resolve();
     },
     get: (id) => Promise.resolve(rows.get(id)),
-    update: (story, expectedVersion) => {
-      const current = rows.get(story.id);
-      if (current === undefined) return Promise.resolve(err("not_found" as const));
-      if (current.version !== expectedVersion) return Promise.resolve(err("version_conflict" as const));
-      const next = { ...story, version: expectedVersion + 1 };
-      rows.set(story.id, next);
-      return Promise.resolve(ok(next));
-    },
+    update: (story, expectedVersion) => Promise.resolve(update(story, expectedVersion)),
+    updateMany: (changes) => Promise.resolve(changes.map((c) => update(c.story, c.expectedVersion))),
     listByStatus: (statuses, limit) => Promise.resolve([...rows.values()].filter((s) => statuses.includes(s.status)).slice(0, limit)),
     listRecentWithItems: () => Promise.resolve([]),
   };

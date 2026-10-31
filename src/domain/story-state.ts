@@ -4,7 +4,8 @@ import type { IsoDateTime, Story, StoryStatus } from "./types.ts";
 /**
  * Story lifecycle (docs/ARCHITECTURE.md §4). Pure: the caller persists the result with optimistic concurrency.
  * Additions to the diagram, all on the safe side: /hold also works on approved and scheduled stories
- * (unhold returns them to review, so they need a fresh approval), and /reject also works on held or approved stories.
+ * (unhold returns them to review, so they need a fresh approval), /reject also works on held or approved stories, and a
+ * scheduled story expires when the publisher cancels its publication for an old approval or a notice whose day is over.
  */
 
 export type StoryEventType =
@@ -53,7 +54,8 @@ const ruleFor = (event: StoryEventType): Rule => {
     case "reject":
       return { from: ["in_review", "on_hold", "approved"], to: "rejected" };
     case "expire":
-      return { from: ["approved"], to: "expired" };
+      // Too long without approval (src/review/expiry.ts), an approval older than its TTL, or a notice whose day is over.
+      return { from: ["awaiting_caption", "in_review", "on_hold", "approved", "scheduled"], to: "expired" };
     case "rereview":
       return { from: ["expired"], to: "in_review" };
     case "schedule_publication":
