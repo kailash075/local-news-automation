@@ -329,7 +329,7 @@ export const memoryTokens = (initial: InstagramCredentials | undefined): TokenSt
 
 // ---------------------------------------------------------------- fake Meta
 
-export type Endpoint = "create" | "status" | "publish" | "permalink" | "limit" | "media" | "refresh";
+export type Endpoint = "create" | "status" | "publish" | "permalink" | "limit" | "media" | "refresh" | "me";
 
 export type RecordedCall = { endpoint: Endpoint; method: string; url: string; headers: Record<string, string>; body: string | undefined };
 
@@ -357,6 +357,7 @@ const endpointOf = (method: string, url: URL): Endpoint => {
   if (method === "POST" && last === "media_publish") return "publish";
   if (last === "content_publishing_limit") return "limit";
   if (last === "media") return "media";
+  if (last === "me") return "me";
   if (url.searchParams.get("fields")?.startsWith("status_code") === true) return "status";
   if (url.searchParams.get("fields") === "permalink") return "permalink";
   throw new Error(`unexpected request ${method} ${url.pathname}`);
@@ -372,6 +373,7 @@ export const fakeMeta = (): FakeMeta => {
     limit: () => json(fixtures.publishingLimit),
     media: () => json(fixtures.mediaEmpty),
     refresh: () => json(fixtures.refresh),
+    me: () => json(fixtures.me),
   };
   const fetch: FetchFn = async (input, init) => {
     const url = new URL(input);

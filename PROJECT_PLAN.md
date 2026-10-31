@@ -1,6 +1,6 @@
 # ErodeGlitz: Project Plan
 
-> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 377 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
+> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 388 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
 > Last updated: 2026-10-31. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
 
 ErodeGlitz is a Tamil-first Instagram page for local news from Erode city and Erode district, Tamil Nadu. This repository will hold an automated newsroom pipeline that:
@@ -63,7 +63,7 @@ Related documents:
 - Storage on a Google Sheet, as in Coimbatore 360 (owner request, 2026-10-30, replacing the Supabase plan): the Apps Script bridge `apps-script/Code.gs`, the tab layout, the stores and a Sheets self test. The same contract tests run on the Sheet stores (real bridge code on a fake Sheet) and on the in-memory stores. Card images on Cloudinary with signed uploads.
 - Text-only Tamil card renderer with bundled Noto fonts; sample cards in `out/samples/` for the owner to check.
 - Review desk (commands, authorisation, issue body), publisher with gates, leases and reconciliation, Instagram client (never called live).
-- Workflows: `ci`, `collect`, `draft`, `review-command`, `publish`, `switch`, `status`, `token-refresh`, `migrate`. Not written yet: `import-token`, `maintenance` (backup, retention, digest), the editor-tip issue form.
+- Workflows: `ci`, `collect`, `draft`, `review-command`, `publish`, `collect-switch`, `status`, `token-refresh`, `import-token`, `migrate`. Not written yet: `maintenance` (backup, retention, digest), the editor-tip issue form.
 - Local result: typecheck and lint clean; `pnpm test` 29 files, 317 tests passed (Node 22.23.2; Node 26 not yet tried).
 - The earlier Postgres and Supabase code is kept, uncommitted, in `out/backup/postgres-supabase-store-2026-10-30.tar.gz` (git-ignored).
 
@@ -299,4 +299,4 @@ Still open: none.
 - Done 2026-10-30: the owner checked the sample cards in `out/samples/`; Tamil text and layout are correct.
 - Owner approval needed: commit and push this work to `master` as `kailash075`. The push starts `ci.yml` (a few Actions minutes). Scheduled workflows stay idle until the repository variables are set.
 - Runner spike: run `draft.yml`'s render job once on `ubuntu-slim` to see whether Chromium works there; record durations in [Operations §9](docs/OPERATIONS.md#9-cost-monitoring-and-budgets).
-- Still to write: `import-token.yml`, `maintenance.yml` (backup export, retention, daily digest), the editor-tip issue form, and a parser for structured power-cut notices so the template caption can be used.
+- Still to write: `maintenance.yml` (backup export, retention, daily digest), the editor-tip issue form, and a parser for structured power-cut notices so the template caption can be used.

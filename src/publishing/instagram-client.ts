@@ -7,7 +7,9 @@ import { err, ok, type Result } from "../lib/result.ts";
  * To confirm in Phase 2 against the live API, before the first real post:
  *  - that `Authorization: Bearer` header auth and JSON request bodies are accepted on every endpoint used here;
  *  - the exact field names of `content_publishing_limit` (`quota_usage`, `config.quota_total`, `config.quota_duration`);
- *  - that `alt_text` is accepted on image containers for this login type.
+ *  - that `alt_text` is accepted on image containers for this login type;
+ *  - the shape of `GET /me`: the get-started guide (read 2026-10-31) shows its fields inside a `data` array, so both that
+ *    and a plain object are accepted.
  * The access token is never placed in a URL, except for `refresh_access_token`, which Meta documents only with a
  * query parameter. That URL is never logged and errors are redacted.
  */
@@ -39,6 +41,9 @@ export type RecentMedia = { id: string; caption?: string; timestamp: string; per
 
 export type RefreshedToken = { accessToken: string; expiresInSeconds: number };
 
+/** `userId` is the account ID used in publishing URLs. */
+export type AccountInfo = { userId: string; username: string };
+
 export type InstagramClient = {
   createImageContainer: (p: {
     igUserId: string;
@@ -52,6 +57,8 @@ export type InstagramClient = {
   getPublishingLimit: (igUserId: string) => Promise<Result<PublishingLimit, InstagramClientError>>;
   listRecentMedia: (igUserId: string, limit?: number) => Promise<Result<readonly RecentMedia[], InstagramClientError>>;
   refreshToken: () => Promise<Result<RefreshedToken, InstagramClientError>>;
+  /** Read-only: the account the token belongs to. */
+  getAccount: () => Promise<Result<AccountInfo, InstagramClientError>>;
 };
 
 export type FetchFn = (input: string, init: RequestInit) => Promise<Response>;
@@ -94,6 +101,9 @@ const MediaListResponse = z.object({
     }),
   ),
 });
+/** The ID stays a string: a 17-digit ID sent as a JSON number would already have lost digits. */
+const AccountFields = z.object({ user_id: z.string().regex(/^\d+$/), username: z.string().min(1) });
+const AccountResponse = z.union([AccountFields, z.object({ data: z.tuple([AccountFields]) })]);
 const RefreshResponse = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().int().positive(),
@@ -268,6 +278,13 @@ export const createInstagramClient = (options: InstagramClientOptions): Instagra
       const url = `${GRAPH_HOST}/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(accessToken)}`;
       const r = await call("GET", url, RefreshResponse, undefined, "none");
       return r.ok ? ok({ accessToken: r.value.access_token, expiresInSeconds: r.value.expires_in }) : r;
+    },
+
+    getAccount: async () => {
+      const r = await call("GET", `${path("me")}?fields=user_id,username`, AccountResponse);
+      if (!r.ok) return r;
+      const fields = "data" in r.value ? r.value.data[0] : r.value;
+      return ok({ userId: fields.user_id, username: fields.username });
     },
   };
 };

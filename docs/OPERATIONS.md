@@ -18,12 +18,15 @@ Editors work from the GitHub mobile app or the website: review issues, then comm
 
 | Workflow | Schedule (IST) | Cron (with `timezone: "Asia/Kolkata"`) | Notes |
 |---|---|---|---|
-| `pipeline.yml` | Hourly at :23, from 06:23 to 22:23 | `23 6-22 * * *` | 17 runs a day. Off-the-hour minute, because GitHub delays scheduled runs at high load, especially at the start of each hour. |
-| `publish.yml` | On demand | none | Started by `review-command.yml` after an approval, or by the owner. `pipeline.yml` also publishes due items at the end of each run. |
+| `collect.yml` | Every 2 hours at :07, from 06:07 to 22:07 | `7 6-22/2 * * *` | 9 runs a day. Works only while automatic collecting is started (collect-switch). Starts `draft.yml` when something is new. Off-the-hour minutes, because GitHub delays scheduled runs at high load, especially at the start of each hour. |
+| `draft.yml` | Safety net every 4 hours at :37, from 07:37 to 19:37 | `37 7-19/4 * * *` | Also started by `collect.yml` and `review-command.yml`. The scheduled run checks first, expires old stories, and starts Chromium only when there is work. |
+| `publish.yml` | Every 2 hours at :47, from 08:47 to 20:47 | `47 8-20/2 * * *` | Catch-up for due items. Also started by an approval when `PUBLISH_ON_APPROVAL` is `true`. Posts only while live. |
 | `review-command.yml` | On each issue comment starting with `/` | none | Non-command comments are filtered out by a job-level `if`, so no runner starts. |
-| `maintenance.yml` | Daily 02:37; backup export on Sundays | `37 2 * * *` | Retention, health checks, daily digest |
-| `token-refresh.yml` | Mondays 03:41 | `41 3 * * 1` | Phase 2 onwards |
+| `status.yml` | Daily 07:13 | `13 7 * * *` | Read-only health report |
+| `token-refresh.yml` | Mondays 03:17 | `17 3 * * 1` | Phase 2 onwards |
+| `import-token.yml`, `collect-switch.yml`, `migrate.yml` | Manual only | none | |
 | `ci.yml` | Push and pull request | none | |
+| `maintenance.yml` | Not written yet | | Planned: retention, health checks, daily digest, weekly backup export |
 
 Scheduled runs can be late or, under heavy load, dropped. The design tolerates this because every job catches up on whatever is due. If no pipeline run has succeeded for 6 hours, an alert is raised (§5).
 
@@ -90,7 +93,7 @@ The system turns the kill switch on by itself, and opens an `ops-alert` issue, w
 
 1. Understand and fix the cause. Write a short note in the incident issue.
 2. Check the publish queue: approvals older than the TTL have expired, so re-approve anything that should still go out.
-3. Check the live quota with `pnpm run job:ig-check` (Phase 2).
+3. Check the live quota: **Actions**, then **status**, then **Run workflow** (Phase 2).
 4. Comment `/killswitch off`. Only `OWNER_GITHUB_LOGIN` is accepted.
 5. If you used them: delete the `PAUSED` variable, put the `LIVE` file back, and re-enable `publish.yml`.
 6. Watch the next publish run.
@@ -151,8 +154,8 @@ Open an issue labelled `incident` for every incident, and record the timeline an
 
 1. Publishing has stopped (automatic trip).
 2. If the token can still be refreshed (less than 60 days old and not revoked), run `token-refresh.yml`.
-3. Otherwise generate a new token in the Meta dashboard and import it ([setup guide §5.3](SETUP_GUIDE.md#63-token-manual-approval)).
-4. Run `job:ig-check`, then resume (§4).
+3. Otherwise generate a new token in the Meta dashboard and import it ([setup guide §6.3](SETUP_GUIDE.md#63-token-manual-approval)).
+4. Run **status** and check that it shows the token and the quota, then resume (§4).
 
 ### 6.E Instagram restriction or spam flag (4 / 2207051, 25 / 2207050)
 
@@ -298,7 +301,7 @@ The Sheet bridge never deletes rows, so until a retention job is written these p
 - [ ] Phase 1 exit criteria met
 - [ ] [Instagram compliance checklist](INSTAGRAM_COMPLIANCE.md#13-go-live-compliance-checklist-phase-2) complete
 - [ ] Lawyer review completed
-- [ ] Token imported and `job:ig-check` passes
+- [ ] Token imported, and **status** shows the token and the live quota
 - [ ] Kill switch tested: each layer blocks a dry-run publish
 - [ ] Reconciliation tested with injected faults in tests
 - [ ] Owner has picked the first story and explicitly approved publishing it

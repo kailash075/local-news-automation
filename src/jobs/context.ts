@@ -36,6 +36,7 @@ export const runJob = async (
   registerSecret(env.SHEET_BRIDGE_KEY);
   registerSecret(env.CLOUDINARY_API_SECRET);
   registerSecret(env.TOKEN_ENCRYPTION_KEY);
+  registerSecret(env.IG_BOOTSTRAP_TOKEN);
 
   const missing = [...missingForSheet(env), ...(options.requires?.(env) ?? [])];
   if (missing.length > 0) {

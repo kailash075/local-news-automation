@@ -37,6 +37,10 @@ describe("loadEnv", () => {
     expect(loadEnv({ MAX_POSTS_PER_DAY: "  ", SHEET_BRIDGE_KEY: " " })).toEqual(loadEnv({}));
   });
 
+  it("trims the pasted bootstrap token", () => {
+    expect(loadEnv({ IG_BOOTSTRAP_TOKEN: "IGAAexampletoken0123456789\n" }).IG_BOOTSTRAP_TOKEN).toBe("IGAAexampletoken0123456789");
+  });
+
   it("still rejects a value that is set but wrong", () => {
     expect(() => loadEnv({ IG_GRAPH_VERSION: "26" })).toThrow();
     expect(() => loadEnv({ MAX_POSTS_PER_DAY: "100" })).toThrow();

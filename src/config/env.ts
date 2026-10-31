@@ -74,6 +74,8 @@ export const EnvSchema = z.object({
   CLOUDINARY_API_SECRET: optionalNonEmpty,
   CLOUDINARY_FOLDER: z.string().regex(/^[a-z0-9_-]+$/).default("erodeglitz"),
   TOKEN_ENCRYPTION_KEY: optionalNonEmpty,
+  /** Temporary (Phase 2): read only by import-token.yml, then deleted. Trimmed, because a pasted secret may end in a newline. */
+  IG_BOOTSTRAP_TOKEN: optionalNonEmpty.transform((v) => v?.trim()),
 
   EDITOR_GITHUB_LOGINS: loginList,
   OWNER_GITHUB_LOGIN: GitHubLoginSchema.optional(),

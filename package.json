@@ -21,6 +21,7 @@
     "job:collect-switch": "node src/jobs/collect-switch.ts",
     "job:status": "node src/jobs/status.ts",
     "job:token-refresh": "node src/jobs/token-refresh.ts",
+    "job:import-token": "node src/jobs/import-token.ts",
     "job:migrate": "node src/jobs/migrate.ts",
     "render:samples": "node src/jobs/render-samples.ts"
   },

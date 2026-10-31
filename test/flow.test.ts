@@ -71,6 +71,7 @@ const noWriteInstagram: InstagramClient = {
   getPublishingLimit: () => Promise.resolve(ok({ quotaUsage: 0, quotaTotal: 100 })),
   listRecentMedia: () => Promise.resolve(ok([])),
   refreshToken: () => Promise.reject(new Error("unexpected")),
+  getAccount: () => Promise.reject(new Error("unexpected")),
 };
 
 describe("Erode flow, Coimbatore 360 pattern with an editor in the loop", () => {

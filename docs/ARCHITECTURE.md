@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status, 2026-10-31:** most of this design is implemented, tested and pushed; the Google Sheet, its bridge and Cloudinary are set up, and manual collect and draft runs work. Not live (no `LIVE` file); nothing has been posted. Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `import-token.yml`, `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
+> **Status, 2026-10-31:** most of this design is implemented, tested and pushed; the Google Sheet, its bridge and Cloudinary are set up, and manual collect and draft runs work. Not live (no `LIVE` file); nothing has been posted. Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
 > Where a detail depends on an external service, the document says what was checked and what still needs verification.
 
 ## 1. Design drivers
@@ -66,11 +66,11 @@ Each workflow runs `node src/jobs/<name>.ts` (the same command as `pnpm run job:
 | `collect-switch.yml` | manual | `ubuntu-slim` | Pause or start automatic collecting and drafting (Coimbatore 360's collect-switch; a Sheet switch) | `collect-switch` |
 | `status.yml` | daily 07:13 IST; manual | `ubuntu-slim` | Read-only health report | `status` |
 | `token-refresh.yml` | Mondays 03:17 IST; manual | `ubuntu-slim` | Refresh the long-lived Instagram token | `token` |
-| `import-token.yml` | manual only (Phase 2) | `ubuntu-slim` | One-time encrypted import of a token from a temporary secret | `token` |
+| `import-token.yml` | manual only (Phase 2) | `ubuntu-slim` | Owner-only import of a token from a temporary secret, after read-only checks (`/me` and the publishing quota); stored encrypted | `token` |
 | `maintenance.yml` | daily schedule; manual (Phase 1) | `ubuntu-slim` | Retention clean-up, daily digest; weekly encrypted backup export | `maintenance` |
 | `migrate.yml` | manual only | `ubuntu-slim` | Create the Sheet's tabs and columns and run the Sheets self test. Other jobs check the layout version and refuse to run on a mismatch. | `migrate` |
 
-`import-token.yml` and `maintenance.yml` are not written yet.
+`maintenance.yml` is not written yet.
 
 Facts this relies on, from GitHub's documentation (checked 2026-10-29):
 

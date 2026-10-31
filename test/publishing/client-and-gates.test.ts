@@ -16,7 +16,8 @@ describe("Instagram client", () => {
     await ig.getPermalink("2");
     await ig.getPublishingLimit(IG_USER_ID);
     await ig.listRecentMedia(IG_USER_ID);
-    expect(meta.calls).toHaveLength(6);
+    await ig.getAccount();
+    expect(meta.calls).toHaveLength(7);
     for (const call of meta.calls) {
       expect(call.url.startsWith("https://graph.instagram.com/v26.0/")).toBe(true);
       expect(call.url).not.toContain(TOKEN);
@@ -34,6 +35,16 @@ describe("Instagram client", () => {
     expect(await ig.getContainerStatus("1")).toEqual({ ok: true, value: { status: "FINISHED" } });
     expect(await ig.getPublishingLimit(IG_USER_ID)).toEqual({ ok: true, value: { quotaUsage: 2, quotaTotal: 50, quotaDurationSeconds: 86400 } });
     expect(await ig.refreshToken()).toEqual({ ok: true, value: { accessToken: fixtures.refresh.access_token, expiresInSeconds: 5183944 } });
+    expect(await ig.getAccount()).toEqual({ ok: true, value: { userId: IG_USER_ID, username: "erodeglitz" } });
+  });
+
+  it("reads the account from a plain object too, and refuses an ID sent as a number", async () => {
+    const { meta, ig } = client();
+    meta.handlers.me = () => json(fixtures.meFlat);
+    expect(await ig.getAccount()).toEqual({ ok: true, value: { userId: IG_USER_ID, username: "erodeglitz" } });
+    expect(meta.calls[0]?.url).toBe("https://graph.instagram.com/v26.0/me?fields=user_id,username");
+    meta.handlers.me = () => new Response('{"user_id":17841400000000001,"username":"erodeglitz"}', { status: 200 });
+    expect(await ig.getAccount()).toMatchObject({ ok: false, error: { kind: "ambiguous" } });
   });
 
   it("parses Meta's error envelope", async () => {

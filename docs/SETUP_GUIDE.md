@@ -85,8 +85,8 @@ Repository **secrets**:
 | `CLOUDINARY_CLOUD_NAME` | 1 | Cloudinary dashboard (§5). Not really secret (it is in every image link), but kept with the other two Cloudinary values, as in Coimbatore 360. |
 | `CLOUDINARY_API_KEY` | 1 | Cloudinary dashboard (§5) |
 | `CLOUDINARY_API_SECRET` | 1 | Cloudinary dashboard (§5) |
-| `TOKEN_ENCRYPTION_KEY` | 1 | 32 random bytes, base64: `openssl rand -base64 32`. Keep an offline copy in your password manager; without it the stored Instagram token cannot be read. |
-| `IG_BOOTSTRAP_TOKEN` | 2 | Temporary. Delete it right after the import workflow succeeds. (The import workflow is not written yet.) |
+| `TOKEN_ENCRYPTION_KEY` | 2 | 32 random bytes, base64. Create it with `openssl rand -base64 32 \| gh secret set TOKEN_ENCRYPTION_KEY --repo kailash075/local-news-automation`, so the value is never shown. No copy is needed: if it is ever lost or changed, the stored token cannot be read, so generate and import a new token (§6.3). |
+| `IG_BOOTSTRAP_TOKEN` | 2 | Temporary. Read only by `import-token.yml`; delete it right after that workflow succeeds (§6.3). |
 | `ANTHROPIC_API_KEY` | 3 | Only if Phase 3 is approved |
 
 Repository **variables** (not secret). The names match what the workflows in `.github/workflows/` read; [Workflows §4](WORKFLOWS.md#4-switches) explains the switches.
@@ -177,21 +177,21 @@ Nothing in this section publishes anything. Publishing starts only after the go-
 1. Sign in at <https://developers.facebook.com> and register as a developer if you have not already. Turn on two-factor authentication for that account.
 2. Create an app of type **Business**. Meta's get-started guide says an existing non-Business app cannot be used; create a new one.
 3. Add the Instagram product and open **API setup with Instagram business login**.
-4. Fill in App Settings: app name, contact email (`erodeglitz@gmail.com`), app icon and **privacy policy URL**. Meta's App Review page lists the privacy policy URL as an App Settings field. The page will be hosted with GitHub Pages from a new public repository, for example `kailash075/erodeglitz-site` (owner decision, 2026-10-30). GitHub Free cannot publish Pages from this private repository, and creating the new repository needs the owner's approval.
+4. Fill in App Settings: app name, contact email (`erodeglitz@gmail.com`), app icon and **privacy policy URL**. Meta's App Review page lists the privacy policy URL as an App Settings field. On 2026-10-30, while this repository was private, the owner chose to host the page with GitHub Pages from a new public repository, for example `kailash075/erodeglitz-site`. Now that this repository is public, GitHub Pages can also publish from it; the owner chooses. Creating a repository or turning on Pages needs the owner's approval.
 5. Permissions needed: `instagram_business_basic` and `instagram_business_content_publish`. **Do not** request Advanced Access or submit App Review. Meta's App Review table says App Review is not required when the app is "only for a business I own or manage".
 6. App mode (development or live): the Instagram pages checked did not say whether publishing to your own account works in development mode. Record what the dashboard shows during setup, and switch to live mode only if it is required and after the privacy policy page exists. [Approval]
 
 ### 6.3 Token [Manual] [Approval]
 
-1. In the app dashboard, under Instagram, then **API setup with Instagram business login**, click **Generate token** next to the ErodeGlitz account and log in to Instagram. Dashboard tokens are long-lived and valid for 60 days.
-2. Do not paste the token into chat, issues, `.env` files or commit messages. Store it directly as a temporary GitHub secret:
+1. In the app dashboard, under Instagram, then **API setup with Instagram business login**, click **Generate token** next to the ErodeGlitz account and log in to Instagram. Meta's get-started guide (read 2026-10-31): "Access tokens from the App Dashboard are long-lived and are valid for 60 days."
+2. Do not paste the token into chat, issues, `.env` files or commit messages. Store it directly as a temporary GitHub secret: on GitHub, **Settings**, then **Secrets and variables**, then **Actions**, then **New repository secret**, name `IG_BOOTSTRAP_TOKEN`, paste the token, **Add secret**. Or from a terminal:
 
    ```bash
    gh secret set IG_BOOTSTRAP_TOKEN --repo kailash075/local-news-automation
    ```
 
-3. Run the **Import Instagram token** workflow (`import-token.yml`, added in Phase 2). It checks the token with a read-only call, encrypts it, stores it in the bridge's Script properties (never in a Sheet tab), and writes the token expiry date to the job summary.
-4. Delete the temporary secret:
+3. Run the import: **Actions**, then **import-token**, then **Run workflow**. Only `OWNER_GITHUB_LOGIN` can import. The job checks the token with two read-only calls (`GET /me?fields=user_id,username`, which must answer `erodeglitz`, and the account's `content_publishing_limit`), encrypts it, stores it in the bridge's Script properties (never in a Sheet tab), reads it back, and writes the expected expiry date to the run summary. The summary must say "import-token: token stored for @erodeglitz". If it says "nothing stored", it gives the reason; fix that and run it again. Nothing is posted.
+4. Delete the temporary secret: **Settings**, then **Secrets and variables**, then **Actions**, then the delete button next to `IG_BOOTSTRAP_TOKEN`. Or:
 
    ```bash
    gh secret delete IG_BOOTSTRAP_TOKEN --repo kailash075/local-news-automation
@@ -201,10 +201,7 @@ Nothing in this section publishes anything. Publishing starts only after the go-
 
 ### 6.4 Read-only verification [Manual]
 
-Phase 2 adds `pnpm run job:ig-check`, which performs **read-only** calls:
-
-- `GET /me?fields=user_id,username`: confirms the account. Put `user_id` in the `IG_USER_ID` variable.
-- `GET /<IG_USER_ID>/content_publishing_limit`: shows the live quota. Meta's pages give conflicting numbers (50 and 100 posts per 24 hours); the live value is the one that counts.
+Run **Actions**, then **status**, then **Run workflow**. Its summary shows the token's expiry and Instagram's live publishing quota (`GET /<account ID>/content_publishing_limit`, read-only). Meta's pages give conflicting numbers (50 and 100 posts per 24 hours); the live value is the one that counts. The import already checked whose account the token belongs to, and the account ID is stored with the token, so there is no `IG_USER_ID` variable to set.
 
 No container is created and nothing is published by this check.
 
