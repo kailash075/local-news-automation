@@ -11,7 +11,7 @@ import { handleComment, type CommentInput, type ReviewDeps } from "./review.ts";
 
 const ISSUE = 41;
 
-const setup = async (storyOverrides: Partial<Story> = {}, envOverrides: Record<string, string> = {}, officialSource = true) => {
+const setup = async (storyOverrides: Partial<Story> = {}, envOverrides: Record<string, string> = {}, officialSource = true, live = true) => {
   const clock = testClock(new Date("2026-10-30T05:00:00Z")); // 10:30 IST
   const stores = createMemoryStores(clock);
   const story = makeStory(clock.now(), { status: "in_review", ...storyOverrides });
@@ -24,6 +24,7 @@ const setup = async (storyOverrides: Partial<Story> = {}, envOverrides: Record<s
   const env = loadEnv({ EDITOR_GITHUB_LOGINS: "kailash075", OWNER_GITHUB_LOGIN: "kailash075", ...envOverrides });
   const deps: ReviewDeps = {
     env,
+    live,
     stores,
     clock,
     dispatch: (workflow) => {
@@ -42,7 +43,7 @@ const setup = async (storyOverrides: Partial<Story> = {}, envOverrides: Record<s
 
 describe("review desk", () => {
   it("approves the current revision and queues one publication", async () => {
-    const t = await setup({}, { PUBLISHING_ENABLED: "true", PUBLISH_ON_APPROVAL: "true" });
+    const t = await setup({}, { PUBLISH_ON_APPROVAL: "true" });
     const result = await t.say(`/approve ${shortHash(t.draft.revisionHash)}`);
     expect(result.reply).toContain("approved");
     expect((await t.stores.stories.get(t.story.id))?.status).toBe("approved");
@@ -50,11 +51,25 @@ describe("review desk", () => {
     expect(t.dispatched).toEqual(["publish.yml"]);
   });
 
-  it("does not start publish.yml unless publishing and publish-on-approval are both on", async () => {
-    const t = await setup();
-    const result = await t.say(`/approve ${shortHash(t.draft.revisionHash)}`);
-    expect(result.reply).toContain("Publishing is not enabled yet");
-    expect(t.dispatched).toEqual([]);
+  it("starts publish.yml on approval only while live, not paused and with the kill switch off", async () => {
+    const approve = async (t: Awaited<ReturnType<typeof setup>>) => (await t.say(`/approve ${shortHash(t.draft.revisionHash)}`)).reply;
+
+    const notLive = await setup({}, { PUBLISH_ON_APPROVAL: "true" }, true, false);
+    expect(await approve(notLive)).toContain("(Nothing is posted yet: not live yet (there is no LIVE file in the repository root).)");
+    expect(notLive.dispatched).toEqual([]);
+
+    const paused = await setup({}, { PUBLISH_ON_APPROVAL: "true", PAUSED: "true" });
+    expect(await approve(paused)).toContain("the repository variable PAUSED is true");
+    expect(paused.dispatched).toEqual([]);
+
+    const stopped = await setup({}, { PUBLISH_ON_APPROVAL: "true" });
+    await stopped.stores.settings.setSwitch("kill_switch", true, "kailash075", "test");
+    expect(await approve(stopped)).toContain("the kill switch is on");
+    expect(stopped.dispatched).toEqual([]);
+
+    const noAutoStart = await setup();
+    expect(await approve(noAutoStart)).not.toContain("Nothing is posted yet");
+    expect(noAutoStart.dispatched).toEqual([]);
   });
 
   it("refuses an approval for an older revision", async () => {
@@ -89,20 +104,23 @@ describe("review desk", () => {
       authorAssociation: "OWNER",
       issueNumber: ISSUE,
     };
-    const deps = { env: loadEnv({ EDITOR_GITHUB_LOGINS: "kailash075" }), stores: t.stores, clock: t.clock, dispatch: () => Promise.resolve(ok(undefined)) };
+    const deps = { env: loadEnv({ EDITOR_GITHUB_LOGINS: "kailash075" }), live: true, stores: t.stores, clock: t.clock, dispatch: () => Promise.resolve(ok(undefined)) };
     expect((await handleComment(deps, input)).reply).toContain("approved");
     expect((await handleComment(deps, input)).reply).toBeUndefined();
   });
 
-  it("lets an editor stop publishing and only the owner start it again", async () => {
+  it("lets an editor turn the kill switch on and only the owner turn it off", async () => {
     const t = await setup({}, { EDITOR_GITHUB_LOGINS: "kailash075,helper1" });
-    await t.stores.settings.setSwitch("publishing_enabled", true, "kailash075", "live");
-    expect((await t.say("/killswitch on wrong district in last post", "helper1", "COLLABORATOR")).reply).toContain("OFF");
-    expect((await t.stores.settings.getSwitch("publishing_enabled")).enabled).toBe(false);
+    expect((await t.say("/killswitch on wrong district in last post", "helper1", "COLLABORATOR")).reply).toContain("Kill switch **ON**");
+    expect(await t.stores.settings.getSwitch("kill_switch")).toMatchObject({ enabled: true, updatedBy: "helper1" });
     expect((await t.say("/killswitch off", "helper1", "COLLABORATOR")).reply).toContain("Only the owner");
-    expect((await t.stores.settings.getSwitch("publishing_enabled")).enabled).toBe(false);
-    await t.say("/killswitch off");
-    expect((await t.stores.settings.getSwitch("publishing_enabled")).enabled).toBe(true);
+    expect((await t.stores.settings.getSwitch("kill_switch")).enabled).toBe(true);
+    expect((await t.say("/killswitch off")).reply).toBe("Kill switch **OFF**.");
+    expect((await t.stores.settings.getSwitch("kill_switch")).enabled).toBe(false);
+
+    const notLive = await setup({}, {}, true, false);
+    await notLive.say("/killswitch on test");
+    expect((await notLive.say("/killswitch off")).reply).toBe("Kill switch **OFF**. Nothing is posted yet: not live yet (there is no LIVE file in the repository root).");
   });
 
   it("asks draft.yml for a new revision after /caption", async () => {

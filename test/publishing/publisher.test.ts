@@ -30,10 +30,11 @@ describe("publishOne: happy path", () => {
   });
 });
 
-describe("kill switch: no Instagram write when any layer is off", () => {
+describe("switches: no Instagram write when any layer stops posting", () => {
   it.each([
-    ["database switch off", { dbSwitch: false }],
-    ["repository variable off", { env: { PUBLISHING_ENABLED: false } }],
+    ["no LIVE file", { live: false }],
+    ["repository variable PAUSED", { env: { PAUSED: true } }],
+    ["kill switch on", { killSwitch: true }],
     ["dry run on", { env: { DRY_RUN: true } }],
   ] as const)("%s", async (_name, options) => {
     const w = await world(options);
@@ -42,11 +43,11 @@ describe("kill switch: no Instagram write when any layer is off", () => {
     expect(["blocked", "would_publish"]).toContain(outcome.kind);
   });
 
-  it("defaults from an empty environment are dry run and publishing off", async () => {
+  it("defaults from an empty environment are a dry run", async () => {
     const defaults = loadEnv({});
     expect(defaults.DRY_RUN).toBe(true);
-    expect(defaults.PUBLISHING_ENABLED).toBe(false);
-    const w = await world({ env: { DRY_RUN: defaults.DRY_RUN, PUBLISHING_ENABLED: defaults.PUBLISHING_ENABLED } });
+    expect(defaults.PAUSED).toBe(false);
+    const w = await world({ env: { DRY_RUN: defaults.DRY_RUN, PAUSED: defaults.PAUSED } });
     const outcome = await publishOne(w.deps);
     expect(outcome.kind).toBe("would_publish");
     expect(w.meta.writes()).toHaveLength(0);
@@ -67,18 +68,26 @@ describe("kill switch: no Instagram write when any layer is off", () => {
   });
 
   it("dry run reports would_publish, never writes, and notes the switch state", async () => {
-    const w = await world({ env: { DRY_RUN: true, PUBLISHING_ENABLED: false }, dbSwitch: false, token: undefined });
+    const w = await world({ env: { DRY_RUN: true, PAUSED: true }, live: false, killSwitch: true, token: undefined });
     const outcome = await publishOne(w.deps);
     expect(outcome.kind).toBe("would_publish");
-    if (outcome.kind === "would_publish") expect(outcome.notes.join(" ")).toContain("switched off");
+    if (outcome.kind === "would_publish") {
+      expect(outcome.notes).toEqual(
+        expect.arrayContaining([
+          "not live yet: there is no LIVE file in the repository root",
+          "repository variable PAUSED is true",
+          "the kill switch is on (/killswitch)",
+        ]),
+      );
+    }
     expect(w.meta.calls).toHaveLength(0);
   });
 
-  it("re-checks the database switch immediately before media_publish", async () => {
+  it("re-checks the kill switch immediately before media_publish", async () => {
     const w = await world();
     // First read is for the gates; the second is the re-check before media_publish.
     w.settings.afterReads = (n) => {
-      if (n === 2) w.settings.states.set("publishing_enabled", { enabled: false, reason: "owner stop", updatedBy: "kailash075" });
+      if (n === 2) w.settings.states.set("kill_switch", { enabled: true, reason: "owner stop", updatedBy: "kailash075" });
     };
     const outcome = await publishOne(w.deps);
     expect(outcome).toMatchObject({ kind: "blocked" });
@@ -213,7 +222,7 @@ describe("unknown outcomes are reconciled, never blindly retried", () => {
     const report = await reconcileUnknown(w.reconcileDeps);
     expect(report.unresolved).toBe(2);
     expect(report.killSwitchTripped).toBe(true);
-    expect(w.settings.states.get("publishing_enabled")?.enabled).toBe(false);
+    expect(w.settings.states.get("kill_switch")?.enabled).toBe(true);
   });
 
   it("a definite server error on media_publish checks the container before any retry", async () => {
@@ -253,13 +262,13 @@ describe("unknown outcomes are reconciled, never blindly retried", () => {
 });
 
 describe("account errors stop all publishing", () => {
-  it("a spam error on media_publish trips the database switch", async () => {
+  it("a spam error on media_publish turns the kill switch on", async () => {
     const w = await world();
     w.meta.handlers.publish = () => json(fixtures.errorSpam, 400);
     const outcome = await publishOne(w.deps);
     expect(outcome.kind).toBe("kill_switch_tripped");
-    const state = w.settings.states.get("publishing_enabled");
-    expect(state).toMatchObject({ enabled: false, updatedBy: "system" });
+    const state = w.settings.states.get("kill_switch");
+    expect(state).toMatchObject({ enabled: true, updatedBy: "system" });
 
     w.clock.advance(2 * 60 * 60_000);
     const next = await publishOne(w.deps);
@@ -271,7 +280,7 @@ describe("account errors stop all publishing", () => {
     const w = await world();
     w.meta.handlers.create = () => json(fixtures.errorRestricted, 400);
     expect((await publishOne(w.deps)).kind).toBe("kill_switch_tripped");
-    expect(w.settings.states.get("publishing_enabled")?.enabled).toBe(false);
+    expect(w.settings.states.get("kill_switch")?.enabled).toBe(true);
     expect(w.meta.count("publish")).toBe(0);
   });
 

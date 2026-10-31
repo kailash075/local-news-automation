@@ -24,8 +24,11 @@ export type Clock = { now: () => Date };
 
 // ---------------------------------------------------------------- switches
 
-/** A missing row means "off": every switch fails closed. */
-export type SwitchKey = "publishing_enabled" | "collecting_enabled";
+/**
+ * `collecting_enabled`: automatic collecting (Actions -> collect-switch). `kill_switch`: on stops all posting (/killswitch).
+ * A missing row means off: collecting paused, kill switch not pulled. Whether anything posts at all is the LIVE file's job.
+ */
+export type SwitchKey = "collecting_enabled" | "kill_switch";
 
 export type SwitchState = {
   enabled: boolean;

@@ -3,8 +3,8 @@ name: draft
 # non-Erode stories, render a text-only Tamil card (no photos, no AI images), upload it to Cloudinary, and open or
 # update one review issue per story. Nothing is published here: every post waits for an editor's approval on its issue.
 # Started by collect.yml and by review-command.yml (after /caption or /headline); the schedule is only a safety net,
-# because GitHub sometimes skips scheduled runs. Like Coimbatore 360's post.yml, a cheap "check" job runs first and the
-# Chromium job starts only when there is something to draft.
+# because GitHub sometimes skips scheduled runs, and it works only while automatic collecting is started (collect-switch).
+# Like Coimbatore 360's post.yml, a cheap "check" job runs first and the Chromium job starts only when there is something to draft.
 on:
   schedule:
     - cron: "37 7-19/4 * * *"
@@ -26,7 +26,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
-    if: github.event_name != 'schedule' || vars.COLLECTING_ENABLED == 'true'
     runs-on: ubuntu-slim
     timeout-minutes: 5
     outputs:

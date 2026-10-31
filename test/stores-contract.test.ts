@@ -47,20 +47,20 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
   });
 
   describe("settings", () => {
-    it("fail closed when a switch was never set", async () => {
-      expect(await s.settings.getSwitch("publishing_enabled")).toEqual({
+    it("read a switch that was never set as off: collecting paused, kill switch not pulled", async () => {
+      expect(await s.settings.getSwitch("collecting_enabled")).toEqual({
         enabled: false,
         reason: "not set",
         updatedBy: "system",
       });
-      expect((await s.settings.getSwitch("collecting_enabled")).enabled).toBe(false);
+      expect((await s.settings.getSwitch("kill_switch")).enabled).toBe(false);
     });
 
     it("store who changed a switch and why", async () => {
-      await s.settings.setSwitch("publishing_enabled", true, "kailash075", "go-live approved");
-      await s.settings.setSwitch("publishing_enabled", false, "kailash075", "killswitch: wrong photo credit");
-      const state = await s.settings.getSwitch("publishing_enabled");
-      expect(state).toMatchObject({ enabled: false, updatedBy: "kailash075", reason: "killswitch: wrong photo credit" });
+      await s.settings.setSwitch("kill_switch", true, "kailash075", "/killswitch on #12: wrong photo credit");
+      await s.settings.setSwitch("kill_switch", false, "kailash075", "/killswitch off #12");
+      const state = await s.settings.getSwitch("kill_switch");
+      expect(state).toMatchObject({ enabled: false, updatedBy: "kailash075", reason: "/killswitch off #12" });
       expect(state.updatedAt).toBe(iso(h.clock.now()));
       expect((await s.settings.getSwitch("collecting_enabled")).enabled).toBe(false);
     });

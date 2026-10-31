@@ -26,10 +26,12 @@ export type ReviewDeps = {
     | "OWNER_GITHUB_LOGIN"
     | "APPROVAL_TTL_HOURS"
     | "POSTING_WINDOW_IST"
-    | "PUBLISHING_ENABLED"
+    | "PAUSED"
     | "PUBLISH_ON_APPROVAL"
     | "IG_USERNAME"
   >;
+  /** The LIVE file exists in the repository root (src/config/live.ts). */
+  live: boolean;
   stores: Pick<Stores, "settings" | "stories" | "drafts" | "evidence" | "decisions" | "reviewThreads" | "publications">;
   clock: Clock;
   dispatch: WorkflowDispatcher;
@@ -43,6 +45,14 @@ const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const isEditor = (deps: ReviewDeps, input: CommentInput): boolean =>
   TRUSTED.has(input.authorAssociation) && deps.env.EDITOR_GITHUB_LOGINS.some((e) => e === input.author);
 
+/** Why nothing would be posted right now, or undefined when the LIVE file, PAUSED and the kill switch all allow it. */
+const postingStoppedBy = async (deps: ReviewDeps): Promise<string | undefined> => {
+  if (!deps.live) return "not live yet (there is no LIVE file in the repository root)";
+  if (deps.env.PAUSED) return "the repository variable PAUSED is true";
+  if ((await deps.stores.settings.getSwitch("kill_switch")).enabled) return "the kill switch is on";
+  return undefined;
+};
+
 const killSwitch = async (
   deps: ReviewDeps,
   input: CommentInput,
@@ -50,18 +60,15 @@ const killSwitch = async (
 ): Promise<ReviewResult> => {
   if (!isEditor(deps, input)) return { dispatched: [] };
   if (command.kind === "killswitch_on") {
-    await deps.stores.settings.setSwitch("publishing_enabled", false, input.author, `/killswitch on #${input.issueNumber}: ${command.reason}`);
-    return { reply: "🛑 Publishing is now **OFF** for every story. Only the owner can switch it back on.", dispatched: [] };
+    await deps.stores.settings.setSwitch("kill_switch", true, input.author, `/killswitch on #${input.issueNumber}: ${command.reason}`);
+    return { reply: "🛑 Kill switch **ON**: nothing is posted for any story. Only the owner can switch it off.", dispatched: [] };
   }
   if (deps.env.OWNER_GITHUB_LOGIN === undefined || input.author !== deps.env.OWNER_GITHUB_LOGIN) {
-    return { reply: "Only the owner can switch publishing back on.", dispatched: [] };
+    return { reply: "Only the owner can switch the kill switch off.", dispatched: [] };
   }
-  await deps.stores.settings.setSwitch("publishing_enabled", true, input.author, `/killswitch off #${input.issueNumber}`);
-  return {
-    reply:
-      "Publishing switch in the Sheet is **ON**. Posts still need the repository variable `PUBLISHING_ENABLED` = `true` and `DRY_RUN` = `false`.",
-    dispatched: [],
-  };
+  await deps.stores.settings.setSwitch("kill_switch", false, input.author, `/killswitch off #${input.issueNumber}`);
+  const stillStopped = await postingStoppedBy(deps);
+  return { reply: `Kill switch **OFF**.${stillStopped === undefined ? "" : ` Nothing is posted yet: ${stillStopped}.`}`, dispatched: [] };
 };
 
 export const handleComment = async (deps: ReviewDeps, input: CommentInput): Promise<ReviewResult> => {
@@ -164,13 +171,14 @@ export const handleComment = async (deps: ReviewDeps, input: CommentInput): Prom
     }
     const dueNow = Date.parse(publication.scheduledFor) <= now.getTime();
     const when = dueNow ? "as soon as the posting rules allow" : `at ${publication.scheduledFor}`;
+    const stopped = await postingStoppedBy(deps);
     const dispatched: string[] = [];
-    if (dueNow && deps.env.PUBLISH_ON_APPROVAL && deps.env.PUBLISHING_ENABLED) {
+    if (dueNow && deps.env.PUBLISH_ON_APPROVAL && stopped === undefined) {
       const started = await deps.dispatch("publish.yml", { dry_run: "false" });
       if (started.ok) dispatched.push("publish.yml");
     }
     return {
-      reply: `✅ Revision ${shortHash(currentDraft.revisionHash)} approved by @${a.editorLogin}. It will be published ${when}, if every gate still passes then.${deps.env.PUBLISHING_ENABLED ? "" : " (Publishing is not enabled yet, so nothing will be posted.)"}`,
+      reply: `✅ Revision ${shortHash(currentDraft.revisionHash)} approved by @${a.editorLogin}. It will be published ${when}, if every gate still passes then.${stopped === undefined ? "" : ` (Nothing is posted yet: ${stopped}.)`}`,
       dispatched,
     };
   }

@@ -1,4 +1,5 @@
 import { collectSource, type CollectOutcome, type RobotsCache } from "../collectors/collect.ts";
+import { scheduledRunPaused } from "./collect-switch.ts";
 import type { FetchLike } from "../collectors/http.ts";
 import { isCollectable } from "../config/sources.ts";
 import type { Clock, SettingsStore, SourceItemStore, SourceStateStore } from "../domain/ports.ts";
@@ -6,6 +7,8 @@ import type { Source } from "../domain/types.ts";
 
 export type CollectRunDeps = {
   settings: SettingsStore;
+  /** A scheduled run collects only while automatic collecting is started (Actions -> collect-switch). */
+  scheduled: boolean;
   sourceState: SourceStateStore;
   sourceItems: SourceItemStore;
   clock: Clock;
@@ -23,8 +26,8 @@ export type CollectRunReport =
  * it is enabled, and robots.txt allows the path (checked inside collectSource).
  */
 export const runCollect = async (deps: CollectRunDeps): Promise<CollectRunReport> => {
-  const sw = await deps.settings.getSwitch("collecting_enabled");
-  if (!sw.enabled) return { status: "switched_off", reason: sw.reason };
+  const paused = await scheduledRunPaused(deps.settings, deps.scheduled);
+  if (paused !== undefined) return { status: "switched_off", reason: paused };
 
   const robotsCache: RobotsCache = new Map();
   const lines: string[] = [];

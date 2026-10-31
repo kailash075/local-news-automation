@@ -104,7 +104,7 @@ export const authorise = (command: ReviewCommand, ctx: CommandContext): Result<A
 
     case "killswitch_off":
       if (ctx.ownerLogin === undefined || editor !== ctx.ownerLogin) {
-        return refuse("owner_only", "Only the owner can switch publishing back on.");
+        return refuse("owner_only", "Only the owner can switch the kill switch off.");
       }
       return ok(base);
 

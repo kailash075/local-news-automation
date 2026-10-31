@@ -5,8 +5,8 @@ import { createBridgeClient, type BridgeClient } from "../sheet/bridge.ts";
 import { createCloudinaryObjectStore } from "../storage/cloudinary.ts";
 
 /**
- * Environment configuration. Every safety-relevant value fails closed:
- * publishing and collecting are off and dry run is on unless a variable says otherwise in exactly the expected form.
+ * Environment configuration. Every safety-relevant value fails closed: dry run is on unless a variable says otherwise
+ * in exactly the expected form. Going live is not a variable: it is the LIVE file in the repository root (./live.ts).
  */
 
 /** Only the exact string "true" turns a switch on. Anything else, including a missing variable, is off. */
@@ -60,8 +60,8 @@ const optionalNonEmpty = z
 
 export const EnvSchema = z.object({
   DRY_RUN: dryRunUnlessExactFalse,
-  PUBLISHING_ENABLED: onlyExactTrue,
-  COLLECTING_ENABLED: onlyExactTrue,
+  /** Repository variable: "true" stops all posting (Coimbatore 360's full stop). */
+  PAUSED: onlyExactTrue,
 
   /** The Apps Script web app of the "ErodeGlitz Newsroom" Sheet (apps-script/Code.gs), ending in /exec. */
   SHEET_BRIDGE_URL: optionalNonEmpty.refine(
@@ -93,6 +93,8 @@ export const EnvSchema = z.object({
   BOT_CONTACT_URL: z.url().default("https://github.com/kailash075/local-news-automation"),
 
   GITHUB_REPOSITORY: optionalNonEmpty,
+  /** Set by GitHub Actions: "schedule" for scheduled runs. */
+  GITHUB_EVENT_NAME: optionalNonEmpty,
   GITHUB_RUN_ID: z.string().default("local"),
   GITHUB_SHA: z.string().default("local"),
   GITHUB_WORKFLOW: z.string().default("local"),

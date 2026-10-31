@@ -67,7 +67,7 @@ export const describeOutcome = (outcome: PublishOutcome): string => {
     case "failed":
       return `Failed (${outcome.errorClass}): ${outcome.message}`;
     case "kill_switch_tripped":
-      return `Publishing was switched off automatically: ${outcome.reason}. Only the owner can switch it back on.`;
+      return `The kill switch went on automatically: ${outcome.reason}. Only the owner can switch it off (/killswitch off).`;
     case "lease_lost":
       return `Another run took over this publication.${outcome.note === undefined ? "" : ` ${outcome.note}`}`;
   }

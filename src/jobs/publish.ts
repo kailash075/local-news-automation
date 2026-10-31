@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { createImagesFromEnv, missingForImages } from "../config/env.ts";
+import { liveFileExists } from "../config/live.ts";
 import { createContentChecker, describeOutcome } from "../app/publish.ts";
 import { createIssuesClient } from "../github/issues.ts";
 import { appendSummary, setOutput } from "../ops/actions.ts";
@@ -17,7 +18,7 @@ await runJob(
       registerSecret(accessToken);
       return createInstagramClient({ fetch: globalThis.fetch, accessToken, graphVersion: env.IG_GRAPH_VERSION });
     };
-    const common = { env, stores, createClient, clock, sleep: (ms: number) => sleep(ms), leaseOwner };
+    const common = { env, live: liveFileExists(), stores, createClient, clock, sleep: (ms: number) => sleep(ms), leaseOwner };
 
     // Unknown outcomes first: nothing new is published while an earlier result is unclear.
     if (!env.DRY_RUN) {

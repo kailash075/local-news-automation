@@ -4,7 +4,6 @@ import { loadEnv } from "./env.ts";
 /** What a workflow step's env looks like when none of the repository variables has been created yet. */
 const UNSET_GITHUB_VARIABLES = {
   APPROVAL_TTL_HOURS: "",
-  COLLECTING_ENABLED: "",
   DRY_RUN: "",
   EDITOR_GITHUB_LOGINS: "",
   IG_GRAPH_VERSION: "",
@@ -12,8 +11,8 @@ const UNSET_GITHUB_VARIABLES = {
   MAX_STORY_AGE_HOURS: "",
   MIN_MINUTES_BETWEEN_POSTS: "",
   OWNER_GITHUB_LOGIN: "",
+  PAUSED: "",
   POSTING_WINDOW_IST: "",
-  PUBLISHING_ENABLED: "",
   PUBLISH_ON_APPROVAL: "",
 };
 
@@ -28,8 +27,7 @@ describe("loadEnv", () => {
     expect(env.MAX_POSTS_PER_DAY).toBe(6);
     expect(env.MIN_MINUTES_BETWEEN_POSTS).toBe(30);
     expect(env.POSTING_WINDOW_IST).toEqual({ startMinute: 8 * 60, endMinute: 21 * 60 });
-    expect(env.PUBLISHING_ENABLED).toBe(false);
-    expect(env.COLLECTING_ENABLED).toBe(false);
+    expect(env.PAUSED).toBe(false);
     expect(env.DRY_RUN).toBe(true);
     expect(env.EDITOR_GITHUB_LOGINS).toEqual([]);
     expect(env.OWNER_GITHUB_LOGIN).toBeUndefined();

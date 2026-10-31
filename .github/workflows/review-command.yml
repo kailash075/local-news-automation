@@ -40,6 +40,6 @@ jobs:
           OWNER_GITHUB_LOGIN: ${{ vars.OWNER_GITHUB_LOGIN }}
           APPROVAL_TTL_HOURS: ${{ vars.APPROVAL_TTL_HOURS }}
           POSTING_WINDOW_IST: ${{ vars.POSTING_WINDOW_IST }}
-          PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
+          PAUSED: ${{ vars.PAUSED }}
           PUBLISH_ON_APPROVAL: ${{ vars.PUBLISH_ON_APPROVAL }}
         run: pnpm run job:review-command

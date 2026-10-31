@@ -41,7 +41,7 @@ const QUOTA_RETRY_MS = 60 * 60_000;
 export type PublisherEnv = Pick<
   Env,
   | "DRY_RUN"
-  | "PUBLISHING_ENABLED"
+  | "PAUSED"
   | "POSTING_WINDOW_IST"
   | "MAX_POSTS_PER_DAY"
   | "MIN_MINUTES_BETWEEN_POSTS"
@@ -59,6 +59,8 @@ export type ContentChecks = {
 
 export type PublisherDeps = {
   env: PublisherEnv;
+  /** The LIVE file exists in the repository root (src/config/live.ts). */
+  live: boolean;
   stores: Pick<Stores, "settings" | "publications" | "tokens" | "stories" | "drafts" | "decisions" | "evidence">;
   objects: Pick<ObjectStore, "publicUrl">;
   createClient: (accessToken: string) => InstagramClient;
@@ -123,7 +125,16 @@ const withoutContainer = (p: Publication): Publication => {
 };
 
 const TERMINAL_GATES: ReadonlySet<GateCode> = new Set(["superseded", "already_published", "approval_expired", "story_state"]);
-const OPERATIONAL_GATES: ReadonlySet<GateCode> = new Set(["kill_switch", "outside_window", "spacing", "daily_cap", "quota", "token"]);
+const OPERATIONAL_GATES: ReadonlySet<GateCode> = new Set([
+  "not_live",
+  "paused",
+  "kill_switch",
+  "outside_window",
+  "spacing",
+  "daily_cap",
+  "quota",
+  "token",
+]);
 
 const errorFields = (e: InstagramClientError): { httpStatus?: number; errorCode?: number; errorSubcode?: number } =>
   e.kind === "api_error"
@@ -213,12 +224,12 @@ export const publishOne = async (deps: PublisherDeps): Promise<PublishOutcome> =
     return { kind: "blocked", publicationId: claimed.id, reasons, cancelled: true };
   }
 
-  const [currentDraft, decisions, evidence, dbSwitch, credentials, published, publishedToday, lastPublishedAt, content] =
+  const [currentDraft, decisions, evidence, killSwitch, credentials, published, publishedToday, lastPublishedAt, content] =
     await Promise.all([
       stores.drafts.latestFor(story.id),
       stores.decisions.listFor(story.id),
       stores.evidence.listFor(story.id),
-      stores.settings.getSwitch("publishing_enabled"),
+      stores.settings.getSwitch("kill_switch"),
       stores.tokens.getInstagram(),
       stores.publications.listByStatus("published"),
       stores.publications.countPublishedSince(startOfIstDay(now)),
@@ -239,7 +250,7 @@ export const publishOne = async (deps: PublisherDeps): Promise<PublishOutcome> =
 
   const gates = evaluateGates({
     now,
-    switches: { databaseEnabled: dbSwitch.enabled, repoVariableEnabled: env.PUBLISHING_ENABLED, dryRun: env.DRY_RUN },
+    switches: { live: deps.live, paused: env.PAUSED, killSwitch: killSwitch.enabled, dryRun: env.DRY_RUN },
     story,
     draft,
     currentDraft,
@@ -370,9 +381,9 @@ const runLive = async (
   }
 
   // Gate 1 again, immediately before the irreversible call.
-  const recheck = await stores.settings.getSwitch("publishing_enabled");
-  if (!recheck.enabled || !deps.env.PUBLISHING_ENABLED || deps.env.DRY_RUN) {
-    const reasons: GateReason[] = [{ code: "kill_switch", message: "publishing was switched off before media_publish" }];
+  const recheck = await stores.settings.getSwitch("kill_switch");
+  if (recheck.enabled || !deps.live || deps.env.PAUSED || deps.env.DRY_RUN) {
+    const reasons: GateReason[] = [{ code: "kill_switch", message: "posting was stopped before media_publish" }];
     await stores.publications.recordAttempt({ publicationId: ctx.pub.id, step: "gates", outcome: "skipped", detail: reasons[0]?.message ?? "", at: nowIso(ctx) });
     await save(ctx, { ...ctx.pub, nextAttemptAt: toIso(new Date(deps.clock.now().getTime() + OPERATIONAL_RETRY_MS)) });
     await release(ctx);
@@ -478,7 +489,7 @@ const handleFailure = async (
       return fail(ctx, errorClass, detail);
     case "trip_kill_switch": {
       const reason = `automatic stop after ${step}: ${detail}`;
-      await deps.stores.settings.setSwitch("publishing_enabled", false, "system", reason);
+      await deps.stores.settings.setSwitch("kill_switch", true, "system", reason);
       await save(ctx, { ...ctx.pub, status: restingStatus, nextAttemptAt: toIso(new Date(now.getTime() + HUMAN_RETRY_MS)), lastError: reason });
       await release(ctx);
       return { kind: "kill_switch_tripped", publicationId: ctx.pub.id, reason };
@@ -568,10 +579,10 @@ export const reconcileUnknown = async (deps: ReconcileDeps): Promise<ReconcileRe
 
   if (report.unresolved >= UNRESOLVED_UNKNOWN_LIMIT) {
     await stores.settings.setSwitch(
-      "publishing_enabled",
-      false,
+      "kill_switch",
+      true,
       "system",
-      `${report.unresolved} publications have an unknown outcome; check Instagram before switching publishing back on`,
+      `${report.unresolved} publications have an unknown outcome; check Instagram before switching the kill switch off`,
     );
     report.killSwitchTripped = true;
   }

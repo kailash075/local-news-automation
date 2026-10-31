@@ -1,3 +1,4 @@
+import { scheduledRunPaused } from "../app/collect-switch.ts";
 import { MAX_NEW_ISSUES_PER_RUN, runDrafts, pendingDraftWork } from "../app/draft.ts";
 import { runTriage } from "../app/triage.ts";
 import { createImagesFromEnv, missingForImages } from "../config/env.ts";
@@ -15,6 +16,12 @@ await runJob(
   checkOnly ? "draft-check" : "draft",
   async ({ env, stores, clock, count }) => {
     if (checkOnly) {
+      const paused = await scheduledRunPaused(stores.settings, env.GITHUB_EVENT_NAME === "schedule");
+      if (paused !== undefined) {
+        setOutput("pending", 0);
+        appendSummary(`### draft check: automatic collecting is PAUSED (${paused}), so the safety-net run stops here`);
+        return "skipped";
+      }
       const pending = await pendingDraftWork({ stores }, onlyStoryId, refreshIssues);
       setOutput("pending", pending);
       appendSummary(`### draft check: ${pending} item(s) of work`);

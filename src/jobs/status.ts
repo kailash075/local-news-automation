@@ -1,3 +1,4 @@
+import { liveFileExists } from "../config/live.ts";
 import { appendSummary } from "../ops/actions.ts";
 import { registerSecret } from "../ops/logger.ts";
 import { createInstagramClient } from "../publishing/instagram-client.ts";
@@ -8,11 +9,12 @@ await runJob("status", async ({ env, stores, clock }) => {
   const now = clock.now();
   const lines: string[] = ["### ErodeGlitz status"];
 
-  const publishing = await stores.settings.getSwitch("publishing_enabled");
   const collecting = await stores.settings.getSwitch("collecting_enabled");
+  const killSwitch = await stores.settings.getSwitch("kill_switch");
   lines.push(
-    `- Collecting: Sheet switch **${collecting.enabled ? "on" : "off"}** (${collecting.reason}), repository variable ${env.COLLECTING_ENABLED ? "on" : "off"}`,
-    `- Publishing: Sheet switch **${publishing.enabled ? "on" : "off"}** (${publishing.reason}), repository variable ${env.PUBLISHING_ENABLED ? "on" : "off"}, dry run ${env.DRY_RUN ? "**on**" : "off"}`,
+    `- Live: ${liveFileExists() ? "**yes** (LIVE file present)" : "**no** (no LIVE file, so nothing is posted)"}${env.PAUSED ? "; repository variable PAUSED is **true** (posting stopped)" : ""}`,
+    `- Kill switch: **${killSwitch.enabled ? "on" : "off"}** (${killSwitch.reason})`,
+    `- Automatic collecting (collect-switch): **${collecting.enabled ? "on" : "paused"}** (${collecting.reason})`,
   );
 
   for (const status of ["awaiting_caption", "in_review", "approved", "scheduled", "publish_unknown", "publish_failed"] as const) {

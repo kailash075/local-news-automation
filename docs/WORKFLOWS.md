@@ -1,6 +1,6 @@
 # Workflows: the Coimbatore 360 pattern, Erode version
 
-> **Status, 2026-10-30:** the code is pushed and `ci` passes. The Google Sheet and the Apps Script bridge are set up, and **Actions → migrate** created the tabs and passed its self test. No other workflow has run, and nothing can post: Cloudinary, the Meta app and the Instagram token do not exist yet, and every switch is off.
+> **Status, 2026-10-31:** the Google Sheet, the Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual `collect` and `draft` runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, and nothing can post, because the Meta app and the Instagram token do not exist yet (Phase 2).
 
 ErodeGlitz posts to the owner's existing Instagram account **@erodeglitz** (Creator account). No new Instagram account is created.
 
@@ -27,7 +27,7 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 | Separate workflows for collect, write and post, each with its own concurrency group | `collect.yml`, `draft.yml`, `publish.yml`, each with its own concurrency group |
 | The collector starts the writer when there is news, instead of waiting for the next schedule | `collect.yml` starts `draft.yml` only when new items arrived |
 | Watchdog, because GitHub sometimes skips scheduled runs | `draft.yml` keeps a 4-hourly safety-net schedule; every job can be rerun safely |
-| One-click pause and start (`collect-switch`, `LIVE` file, `PAUSED` variable) | `switch.yml` plus repository variables. See §4. |
+| One-click pause and start (`collect-switch`, `LIVE` file, `PAUSED` variable) | The same three switches, used the same way. See §4. |
 | Manual runs of the poster are test-only by default (`dry_run`) | `publish.yml` and `collect.yml` manual runs are dry runs unless you untick the box |
 | "Setup not finished" exit when secrets are missing | Every job checks its configuration and exits cleanly with a clear message |
 | Priority: power cut > crime > accident > civic > the rest | Topic priority with power cuts first (`src/pipeline/topic.ts`). Crime and accidents are flagged sensitive, so an editor decides. |
@@ -60,18 +60,27 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 
 ## 4. Switches
 
-Coimbatore 360 has three switches: the `research_free/ENABLED` file, the `LIVE` file and the `PAUSED` variable. ErodeGlitz keeps the idea, but no switch lives in a file that a bot commits.
+The same switches as Coimbatore 360, used the same way (owner decision, 2026-10-31):
 
-| Switch | Where | Effect | Default |
-|---|---|---|---|
-| `COLLECTING_ENABLED` | Repository variable | Scheduled `collect`, `draft` and `status` runs start only when it is `true`. A skipped job costs no minutes. | not set (off) |
-| `collecting_enabled` | Sheet (`settings` tab), set by **Actions → switch** | The collector refuses to run while it is off | off |
-| `PUBLISHING_ENABLED` | Repository variable | `publish.yml` runs for real only when it is `true` | not set (off) |
-| `publishing_enabled` | Sheet (`settings` tab), set by **Actions → switch** or `/killswitch on <reason>` on any issue | Checked before the container is created and again immediately before `media_publish` | off |
-| `DRY_RUN` | Repository variable | Must be exactly `false` for a scheduled run to post | not set (dry run) |
-| `PUBLISH_ON_APPROVAL` | Repository variable | When `true`, an approval starts `publish.yml` at once; otherwise the hourly run picks it up | not set (off) |
+| Switch | Effect | Default |
+|---|---|---|
+| **Actions → collect-switch** → `pause` / `start` | Automatic collecting and drafting on or off. Scheduled `collect` and `draft` runs check it; a run started by hand or by another workflow always works. Posting continues. Only the owner can start it. | paused |
+| `LIVE` file in the repository root | Posts reach Instagram only while it exists. Remove it to stop posting. | no file (not live) |
+| Manual run of **publish** | Test only by default (`dry_run`) | dry run |
+| Repository variable `PAUSED` = `true` | Full stop of posting too | not set |
 
-To stop everything at once: comment `/killswitch on <reason>` on any review issue, or set `PUBLISHING_ENABLED` to `false`. Only the owner can switch publishing back on.
+Three small differences. Coimbatore 360's collect-switch commits a `research_free/ENABLED` file; ErodeGlitz keeps the switch in the Sheet (`collecting_enabled` in the `settings` tab), because the bot never commits. In Coimbatore 360 a manual post run with `dry_run` unticked posts even without the `LIVE` file; here nothing posts without it. And Coimbatore 360's code never reads `PAUSED`; here it works.
+
+ErodeGlitz adds two safeguards, because the owner's rules require them:
+
+| Safeguard | Effect |
+|---|---|
+| `/approve <rev>` (or `/approve-sensitive <rev>`) on the story's issue | Every post needs it, live or not |
+| `/killswitch on <reason>` on any issue | Stops all posting at once, from a phone too. Only the owner can undo it with `/killswitch off`. The publisher also turns it on by itself after account or token errors. Stored as `kill_switch` in the Sheet. |
+
+`PUBLISH_ON_APPROVAL` = `true` (repository variable) makes an approval start `publish` at once, only while live; otherwise the 2-hourly run picks it up.
+
+**Go live** (Coimbatore 360's step 8): add an (empty) `LIVE` file to the repository root, then **Actions → collect-switch** → `start`. Approved stories then post with the next `publish` run.
 
 ## 5. Schedules and cost
 
@@ -89,6 +98,8 @@ All times IST (`timezone: "Asia/Kolkata"` on each cron entry). The minutes are e
 | `ci.yml` | each push | `ubuntu-latest` | depends | about 100 |
 
 GitHub rounds each job up to a whole minute, so even a job that exits at once costs one minute. A job skipped by its `if:` condition costs nothing.
+
+Like Coimbatore 360, scheduled runs start every time and check their switch inside the job. While collecting is paused and the page is not live, each scheduled run still costs about one minute: `collect` 270, `draft` check 120, `publish` 210, `status` 30 and `token-refresh` 4, so about 630 minutes a month (about USD 1.30 at the `ubuntu-slim` rate below). Setting `PAUSED` = `true` skips the `publish` job entirely.
 
 Rough monthly cost against the USD 12 included on GitHub Free: `ubuntu-slim` about 1,950 minutes × USD 0.002 ≈ USD 3.90; `ubuntu-latest` about 460 minutes × USD 0.006 ≈ USD 2.80; total about USD 6.70. That is a little above the 50% target in the [operations runbook](OPERATIONS.md#9-cost-monitoring-and-budgets). The Phase 0 runner spike measures the real durations; if Chromium works on `ubuntu-slim`, the render job moves there and the total drops to about USD 5.
 
@@ -111,6 +122,7 @@ The Google Sheet adds time: each bridge call takes about 1–2 seconds, and a dr
 | Add secrets `SHEET_BRIDGE_URL`, `SHEET_BRIDGE_KEY`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `TOKEN_ENCRYPTION_KEY`, and the repository variables | Owner | Yes |
 | Run **Actions → migrate** | Owner | Yes |
 | Review and approve the first sources' terms | Owner | Yes |
-| Set `COLLECTING_ENABLED=true` and switch collecting on: Phase 1 dry run for 14 days | Owner | Yes |
+| Phase 1 trial for 14 days: **Actions → collect-switch** → `start`, without a `LIVE` file, so review issues arrive and nothing posts | Owner | Yes (Actions minutes) |
 | Meta app, Instagram token for @erodeglitz, privacy-policy page, lawyer review | Owner | Yes (Phase 2) |
-| First real post | Owner | Yes |
+| **Go live**: add an (empty) `LIVE` file to the repository root, then **Actions → collect-switch** → `start` | Owner | Yes |
+| First real post: `/approve` on its issue | Owner | Yes |

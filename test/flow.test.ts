@@ -69,25 +69,26 @@ const noWriteInstagram: InstagramClient = {
 };
 
 describe("Erode flow, Coimbatore 360 pattern with an editor in the loop", () => {
-  it("collect is refused while the Sheet switch is off, and only owner-approved sources are fetched", async () => {
+  it("a scheduled collect waits for collect-switch start, a manual one always runs, and only owner-approved sources are fetched", async () => {
     const clock = testClock();
     const stores = createMemoryStores(clock);
-    const off = await runCollect({ ...stores, settings: stores.settings, clock, contactUrl: "https://example.org", sources: SOURCES });
-    expect(off.status).toBe("switched_off");
-
-    await stores.settings.setSwitch("collecting_enabled", true, "kailash075", "test");
     const fetchedHosts = new Set<string>();
-    const report = await runCollect({
+    const deps = {
       ...stores,
       clock,
       contactUrl: "https://example.org",
       sources: SOURCES,
-      fetch: (input) => {
+      fetch: (input: string) => {
         fetchedHosts.add(new URL(input).host);
         return Promise.resolve(new Response("", { status: 500 }));
       },
-    });
-    expect(report.status).toBe("done");
+    };
+    expect((await runCollect({ ...deps, scheduled: true })).status).toBe("switched_off");
+    expect(fetchedHosts.size).toBe(0);
+    expect((await runCollect({ ...deps, scheduled: false })).status).toBe("done");
+
+    await stores.settings.setSwitch("collecting_enabled", true, "kailash075", "collect-switch start");
+    expect((await runCollect({ ...deps, scheduled: true })).status).toBe("done");
     const approvedHosts = new Set(SOURCES.filter((s) => s.termsReview.status === "approved" && s.kind !== "editor_tip").map((s) => new URL(s.url).host));
     expect(fetchedHosts.size).toBeGreaterThan(0);
     for (const host of fetchedHosts) expect(approvedHosts.has(host), host).toBe(true);
@@ -159,7 +160,7 @@ describe("Erode flow, Coimbatore 360 pattern with an editor in the loop", () => 
     const say = (body: string) => {
       commentId += 1;
       const input: CommentInput = { body, commentId, author: "kailash075", authorAssociation: "OWNER", issueNumber: 1 };
-      return handleComment({ env, stores, clock, dispatch: () => Promise.resolve(ok(undefined)) }, input);
+      return handleComment({ env, live: false, stores, clock, dispatch: () => Promise.resolve(ok(undefined)) }, input);
     };
 
     clock.advance(60_000);
@@ -182,10 +183,12 @@ describe("Erode flow, Coimbatore 360 pattern with an editor in the loop", () => 
 
     const approval = await say(`/approve ${shortHash(draft.revisionHash)}`);
     expect(approval.reply).toContain("approved");
+    expect(approval.reply).toContain("not live yet");
 
     // Publisher dry run: every blocking gate passes, Instagram's write endpoints are never called.
     const outcome = await publishOne({
       env,
+      live: false,
       stores,
       objects: { publicUrl: (key) => Promise.resolve(`https://storage.example/${key}`) },
       createClient: () => noWriteInstagram,

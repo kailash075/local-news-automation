@@ -14,6 +14,7 @@ import type {
   SourceStateStore,
   Stores,
   StoryStore,
+  SwitchKey,
   TokenStore,
 } from "../domain/ports.ts";
 import {
@@ -336,6 +337,9 @@ export type SheetStoreOptions = {
   tokenKeyVersion?: number;
 };
 
+/** A value typed by hand that is neither "true" nor "false" reads as the safe state: collecting paused, kill switch pulled. */
+const SAFE_WHEN_INVALID: Readonly<Record<SwitchKey, boolean>> = { collecting_enabled: false, kill_switch: true };
+
 const createSettingsStore = (bridge: BridgeClient, clock: Clock): SettingsStore => ({
   getSwitch: async (key) => {
     const [row] = await bridge.select(TABLES.settings.name, { key });
@@ -344,7 +348,7 @@ const createSettingsStore = (bridge: BridgeClient, clock: Clock): SettingsStore 
     const valid = enabled === "true" || enabled === "false";
     const updatedAt = IsoDateTimeSchema.safeParse(cellOf(row, "updated_at"));
     return {
-      enabled: enabled === "true",
+      enabled: valid ? enabled === "true" : SAFE_WHEN_INVALID[key],
       reason: valid ? cellOf(row, "reason") : "invalid stored value",
       updatedBy: cellOf(row, "updated_by"),
       ...(updatedAt.success ? { updatedAt: updatedAt.data } : {}),

@@ -1,7 +1,7 @@
 # ErodeGlitz: Project Plan
 
-> **Status, 2026-10-30: Phase 0 code pushed; `ci` passes.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, see [Workflows](docs/WORKFLOWS.md)) and 339 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet and its Apps Script bridge are set up, and the migrate run created the tabs and passed its self test. Cloudinary, the Meta app, the Instagram token and every other external piece do not exist yet, no switch is on, and nothing has been posted.
-> Last updated: 2026-10-30. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
+> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 342 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
+> Last updated: 2026-10-31. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
 
 ErodeGlitz is a Tamil-first Instagram page for local news from Erode city and Erode district, Tamil Nadu. This repository will hold an automated newsroom pipeline that:
 
@@ -104,7 +104,7 @@ These rules hold in every phase. Code, tests and reviews enforce them.
 2. **AI never verifies.** AI output can raise risk flags. It can never lower a risk tier, count as verification evidence, or approve a post. The evidence types in code have no AI variant.
 3. **Official channels only.** Publishing uses Meta's Instagram Platform API with a token issued through Meta's own login flow. No passwords, browser cookies, scraped credentials, browser automation or unofficial endpoints, ever.
 4. **Fail closed.** Missing configuration, a failed check, an unknown state or an unreachable dependency means "do not publish".
-5. **Publishing is off by default.** The kill switch starts in the off position. It is checked again immediately before each irreversible API call.
+5. **Publishing is off by default.** Nothing posts until the owner adds the `LIVE` file to the repository root (Coimbatore 360's go-live switch). The kill switch is checked again immediately before each irreversible API call.
 6. **Idempotent external writes.** Every external write is recorded before and after it happens. An ambiguous result is reconciled before anything is retried.
 7. **The Google Sheet is the system of record.** The runner filesystem, workflow artifacts and caches are scratch space only.
 8. **Explicit approval for anything outward-facing.** No account creation, spending, setting changes or posts happen without the owner's explicit approval.
@@ -144,7 +144,7 @@ Deliverables:
 - `package.json` (`"type": "module"`, `engines`), `.node-version`, pnpm lockfile, `.env.example` with placeholder values only.
 - `tsconfig.json` with the settings in [Architecture §11](docs/ARCHITECTURE.md#11-code-organisation-and-coding-standards); ESLint flat config enforcing `type` over `interface`, no `any`, no unsafe access, exhaustive switches; Vitest with coverage thresholds for the domain and publishing modules.
 - `src/domain`: story, source item, verification evidence, risk assessment, draft revision, editorial decision and publication types, each with a Zod schema checked against the type. Pure state-machine functions with unit tests.
-- Configuration loader with Zod validation and fail-closed defaults (`PUBLISHING_ENABLED=false`, `DRY_RUN=true`).
+- Configuration loader with Zod validation and fail-closed defaults (dry run unless `DRY_RUN=false`).
 - **Rendering spike:** one HTML template rendered by Chromium with bundled Noto Sans Tamil into a 1080×1350 JPEG. Sample images go to the owner to confirm the Tamil text is shaped correctly.
 - **Storage spike:** done differently: the Sheet bridge runs inside Vitest with a fake Sheet; the real-Sheet self test runs in the `migrate` workflow.
 - `ci.yml`: frozen-lockfile install, typecheck, lint, test. Third-party actions pinned to full commit SHAs. Dependabot for npm and GitHub Actions.
@@ -186,7 +186,7 @@ Deliverables:
 - Contract tests built from documented responses, plus fault-injection tests for a timeout at every step.
 - Go-live procedure: the owner explicitly approves the first post. For the first two weeks, each publish run is started by the owner by hand before approval-triggered publishing is switched on.
 
-Approvals needed: creating the Meta app; generating the token; creating the public `erodeglitz-site` repository for the privacy policy page (GitHub Pages); the first post; switching `PUBLISHING_ENABLED` on. Before the first public post, a lawyer reviews the editorial policy and setup (owner decision, 2026-10-30).
+Approvals needed: creating the Meta app; generating the token; creating the public `erodeglitz-site` repository for the privacy policy page (GitHub Pages); the first post; going live (adding the `LIVE` file). Before the first public post, a lawyer reviews the editorial policy and setup (owner decision, 2026-10-30).
 
 Exit criteria: 20 posts published with zero duplicates; no unknown publish state left unresolved for more than one hour; token refresh exercised successfully.
 

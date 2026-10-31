@@ -9,6 +9,8 @@ import { formatIst, insideWindow, type PostingWindow } from "./ist.ts";
  */
 
 export type GateCode =
+  | "not_live"
+  | "paused"
   | "kill_switch"
   | "story_state"
   | "superseded"
@@ -31,7 +33,8 @@ export type GateReason = { code: GateCode; message: string };
 
 export type GateInput = {
   now: Date;
-  switches: { databaseEnabled: boolean; repoVariableEnabled: boolean; dryRun: boolean };
+  /** `live`: the LIVE file exists. `paused`: repository variable PAUSED is "true". `killSwitch`: the Sheet's kill switch is on. */
+  switches: { live: boolean; paused: boolean; killSwitch: boolean; dryRun: boolean };
   story: Story;
   /** The draft this publication was created for. */
   draft: DraftRevision;
@@ -66,7 +69,7 @@ export type GateResult =
 
 const APPROVAL_KINDS: ReadonlySet<EditorialDecision["kind"]> = new Set(["approve", "approve_sensitive", "schedule"]);
 
-export const switchesAllowPublishing = (s: GateInput["switches"]): boolean => s.databaseEnabled && s.repoVariableEnabled && !s.dryRun;
+export const switchesAllowPublishing = (s: GateInput["switches"]): boolean => s.live && !s.paused && !s.killSwitch && !s.dryRun;
 
 export const evaluateGates = (input: GateInput): GateResult => {
   const reasons: GateReason[] = [];
@@ -79,9 +82,10 @@ export const evaluateGates = (input: GateInput): GateResult => {
   };
   const { story, draft, now } = input;
 
-  // 1. Kill switch: database flag, repository variable, and not dry run.
-  if (!input.switches.databaseEnabled) operational({ code: "kill_switch", message: "publishing is switched off in the Sheet (settings tab)" });
-  if (!input.switches.repoVariableEnabled) operational({ code: "kill_switch", message: "repository variable PUBLISHING_ENABLED is not true" });
+  // 1. Switches: Coimbatore 360's LIVE file and PAUSED variable, then the kill switch.
+  if (!input.switches.live) operational({ code: "not_live", message: "not live yet: there is no LIVE file in the repository root" });
+  if (input.switches.paused) operational({ code: "paused", message: "repository variable PAUSED is true" });
+  if (input.switches.killSwitch) operational({ code: "kill_switch", message: "the kill switch is on (/killswitch)" });
 
   // 2. Approval of exactly this revision, current, in time, by an allowlisted editor, of the right kind.
   if (story.status !== "approved" && story.status !== "scheduled") {

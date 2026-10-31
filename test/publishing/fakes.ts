@@ -43,7 +43,7 @@ export const NOON_IST = new Date("2026-10-30T06:30:00Z");
 
 export const env = (overrides: Partial<PublisherEnv> = {}): PublisherEnv => ({
   DRY_RUN: false,
-  PUBLISHING_ENABLED: true,
+  PAUSED: false,
   POSTING_WINDOW_IST: { startMinute: 8 * 60, endMinute: 21 * 60 },
   MAX_POSTS_PER_DAY: 6,
   MIN_MINUTES_BETWEEN_POSTS: 30,
@@ -228,8 +228,8 @@ export const memoryPublications = (): MemoryPublications => {
 
 export type MemorySettings = SettingsStore & { states: Map<SwitchKey, SwitchState>; reads: number; afterReads?: (n: number) => void };
 
-export const memorySettings = (publishingEnabled: boolean): MemorySettings => {
-  const states = new Map<SwitchKey, SwitchState>([["publishing_enabled", { enabled: publishingEnabled, reason: "test", updatedBy: "owner" }]]);
+export const memorySettings = (killSwitch: boolean): MemorySettings => {
+  const states = new Map<SwitchKey, SwitchState>([["kill_switch", { enabled: killSwitch, reason: "test", updatedBy: "owner" }]]);
   const s: MemorySettings = {
     states,
     reads: 0,
@@ -399,7 +399,10 @@ export type World = {
 export type WorldOptions = {
   env?: Partial<PublisherEnv>;
   story?: Partial<Story>;
-  dbSwitch?: boolean;
+  /** The Sheet's kill switch is on. Default: off. */
+  killSwitch?: boolean;
+  /** The LIVE file exists. Default: yes. */
+  live?: boolean;
   token?: InstagramCredentials | undefined;
   decisions?: (draft: DraftRevision) => readonly EditorialDecision[];
   evidence?: readonly VerificationEvidence[];
@@ -412,7 +415,7 @@ export const world = async (options: WorldOptions = {}): Promise<World> => {
   const draft = makeDraft(story);
   const drafts = [draft, ...(options.extraDrafts?.(story) ?? [])];
   const publications = memoryPublications();
-  const settings = memorySettings(options.dbSwitch ?? true);
+  const settings = memorySettings(options.killSwitch ?? false);
   const stories = memoryStories([story]);
   const clock = mutableClock(options.now ?? NOON_IST);
   const meta = fakeMeta();
@@ -428,6 +431,7 @@ export const world = async (options: WorldOptions = {}): Promise<World> => {
   );
   const common = {
     env: env(options.env),
+    live: options.live ?? true,
     stores: {
       settings,
       publications,

@@ -1,6 +1,6 @@
 # Setup Guide
 
-> **Status, 2026-10-30: §4 (Google Sheet and Apps Script bridge) is done: the bridge is deployed, both GitHub secrets are set and the migrate run passed. Nothing else in this guide has been set up yet.** Each step is marked:
+> **Status, 2026-10-31: §4 (Google Sheet and Apps Script bridge) and §5 (Cloudinary) are done, and the five newspaper sources are approved. Not live: no `LIVE` file, automatic collecting paused. Phase 2 (§6, Meta and Instagram) has not started.** Each step is marked:
 >
 > - **[Manual]**: a person has to do it; the code cannot.
 > - **[Approval]**: creates an account, changes a setting, spends money, or can publish. The owner must explicitly approve it first.
@@ -47,7 +47,7 @@
 
    Render tests need the Chromium headless shell: `pnpm exec playwright-core install chromium-headless-shell`.
 
-5. **Local environment file.** Copy `.env.example` to `.env` for local experiments. `.env` is already git-ignored. Local runs default to `DRY_RUN=true` and `PUBLISHING_ENABLED=false`. Never put production credentials in `.env` unless you need them for a specific task, and remove them afterwards.
+5. **Local environment file.** Copy `.env.example` to `.env` for local experiments. `.env` is already git-ignored. Local runs are dry runs unless `DRY_RUN=false`, and nothing posts without a `LIVE` file. Never put production credentials in `.env` unless you need them for a specific task, and remove them afterwards.
 
 Docker is not required. The storage tests run the real bridge code (`apps-script/Code.gs`) against an in-memory fake Google Sheet.
 
@@ -93,12 +93,10 @@ Repository **variables** (not secret). The names match what the workflows in `.g
 
 | Name | Default when not set | Meaning |
 |---|---|---|
-| `COLLECTING_ENABLED` | off | Must be exactly `true` for scheduled `collect`, `draft` and `status` runs to start |
-| `PUBLISHING_ENABLED` | off | Must be exactly `true` for any publishing to happen |
-| `DRY_RUN` | on | Must be exactly `false` for a scheduled publish run to call Instagram |
-| `PUBLISH_ON_APPROVAL` | off | When `true`, an approval starts `publish.yml` at once |
+| `PAUSED` | not set | `true` stops all posting (Coimbatore 360's full stop). Going live is not a variable: it is the `LIVE` file ([Workflows §4](WORKFLOWS.md#4-switches)). |
+| `PUBLISH_ON_APPROVAL` | off | When `true`, an approval starts `publish.yml` at once (only while live) |
 | `EDITOR_GITHUB_LOGINS` | none (nobody can run commands) | Comma-separated logins allowed to run review commands. Set to `kailash075`. |
-| `OWNER_GITHUB_LOGIN` | none (nobody can switch publishing on) | The only login that can switch publishing on. Set to `kailash075`. |
+| `OWNER_GITHUB_LOGIN` | none (nobody can start collecting or switch the kill switch off) | The only login that can start automatic collecting (**collect-switch**) and switch the kill switch off. Set to `kailash075`. |
 | `CLOUDINARY_FOLDER` | `erodeglitz` | Folder for card images in Cloudinary |
 | `IG_GRAPH_VERSION` | `v26.0` | Pinned Graph API version |
 | `POSTING_WINDOW_IST` | `08:00-21:00` | No posts outside this window (owner decision, 2026-10-30) |
@@ -115,7 +113,7 @@ The Instagram account is fixed in code as `erodeglitz` (`IG_USERNAME`); its nume
 
 ## 4. Google Sheet and Apps Script bridge (Phase 1) [Approval]
 
-> Owner decision, 2026-10-30: use a Google Sheet as storage, the same way Coimbatore 360 does. It replaces the Supabase plan. Nothing has been created yet.
+> Owner decision, 2026-10-30: use a Google Sheet as storage, the same way Coimbatore 360 does. It replaces the Supabase plan. Done on 2026-10-30.
 
 The jobs never touch the Sheet directly. A small Apps Script web app inside the Sheet (the "bridge", `apps-script/Code.gs`) receives their requests, checks a key, and reads or writes rows while holding a lock, so two jobs cannot overwrite each other.
 
@@ -140,13 +138,13 @@ Working with the Sheet:
 - Read it any time; it is the newsroom's record: stories, source items, drafts, decisions, publications, job runs and errors, one tab each.
 - You may add columns of your own (for notes) and use filter views. Do not rename or delete tabs or columns, and do not sort or delete rows: the jobs find rows by their content, but a sort or delete while a job is writing can misplace that write.
 - Editing a cell by hand bypasses the checks the bridge enforces (for example, decisions and evidence are append-only through the bridge). Fix mistakes by hand only when you must, and say so in the review issue.
-- The `settings` tab holds the switches. A hand-typed value turns publishing on only if it is exactly `true` in a plain-text cell; anything else counts as off.
+- The `settings` tab holds two switches: `collecting_enabled` (set by **Actions → collect-switch**) and `kill_switch` (set by `/killswitch`). Change them that way, not by hand. A hand-typed value that is not exactly `true` or `false` counts as the safe state: collecting paused, kill switch on.
 - Limits: a Sheet holds up to 10 million cells, which is many years at this volume. Each bridge call takes about 1–2 seconds, so jobs run longer than they would with a database; check job durations in the first week.
 - **Backups:** Google keeps the Sheet's version history (**File → Version history**). Once a week, also download a copy (**File → Download → Microsoft Excel**) and keep it offline. An automatic backup job is not written yet.
 
 ## 5. Cloudinary for card images (Phase 1) [Approval]
 
-Instagram downloads each image from a public URL. Coimbatore 360 uses Cloudinary for this, and so does ErodeGlitz. Nothing has been created yet.
+Instagram downloads each image from a public URL. Coimbatore 360 uses Cloudinary for this, and so does ErodeGlitz. Done on 2026-10-30; no card has been uploaded yet.
 
 1. Sign up at <https://cloudinary.com> with `erodeglitz@gmail.com` on the **Free** plan. Do not add a card. Check the current Free plan limits on the pricing page; at about 6 cards a day of roughly 300 KB each, ErodeGlitz uses a few hundred MB a year.
 2. From the dashboard, copy:
@@ -230,7 +228,7 @@ No container is created and nothing is published by this check.
 
 - [ ] Google Sheet and Apps Script bridge set up; **Actions → migrate** self test passes
 - [ ] Cloudinary account created after approval
-- [ ] Secrets and variables set; `PUBLISHING_ENABLED=false`, `DRY_RUN=true`
+- [ ] Secrets and variables set; no `LIVE` file
 - [ ] First sources reviewed and approved in the registry
 - [ ] Scheduled pipeline creates review issues; commands work from the GitHub mobile app
 - [ ] Dry-run publisher records "would publish" decisions
@@ -242,15 +240,15 @@ No container is created and nothing is published by this check.
 - [ ] Token imported; temporary secret deleted
 - [ ] **Actions → status** shows the token for `erodeglitz` and the live quota
 - [ ] Go-live checklist completed ([Operations §11](OPERATIONS.md#11-release-and-change-management))
+- [ ] **Go live** (Coimbatore 360's step 8): an (empty) `LIVE` file added to the repository root, then **Actions → collect-switch** → `start`
 - [ ] First post explicitly approved by the owner
 
-## 9. Not set up (as of 2026-10-30)
+## 9. Not set up (as of 2026-10-31)
 
-- No `ErodeGlitz Newsroom` Sheet and no Apps Script bridge (approved, not created).
-- No Cloudinary account (needs approval).
 - Two-factor authentication on the `erodeglitz@gmail.com` Google account is not confirmed yet.
-- No Meta developer app and no token. (The `erodeglitz` Instagram account itself is ready: a Creator account.)
+- No Meta developer app and no token, and no `TOKEN_ENCRYPTION_KEY` secret. (The `erodeglitz` Instagram account itself is ready: a Creator account.)
+- No `LIVE` file: the page is not live.
 - No Anthropic account or API key.
-- No GitHub secrets, variables, labels or issue templates. The workflows exist locally but are not pushed.
+- No editor-tip issue template.
 - No privacy policy page or `erodeglitz-site` repository.
 - The global active `gh` account is still `kailashrajendiran`; this repository uses local settings for `kailash075` instead (§2).

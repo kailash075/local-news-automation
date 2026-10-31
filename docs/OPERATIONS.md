@@ -51,28 +51,28 @@ Targets: R0 notices reviewed within 2 hours during the posting window, so the in
 
 Use **any one** of these. Each is enough on its own.
 
-1. **From a phone:** comment `/killswitch on <reason>` on any issue. Any editor can do this. It sets the Sheet switch (`settings` tab) that the publisher reads immediately before each Instagram call.
-2. **Repository variable:** GitHub, then Settings, then Secrets and variables, then Actions, then Variables: set `PUBLISHING_ENABLED` to `false`. Or from a terminal:
+1. **From a phone:** comment `/killswitch on <reason>` on any issue. Any editor can do this. It turns on the Sheet's `kill_switch` (`settings` tab), which the publisher reads immediately before each Instagram call.
+2. **Repository variable `PAUSED`** (Coimbatore 360's full stop): GitHub, then Settings, then Secrets and variables, then Actions, then Variables: create `PAUSED` with the value `true`. Or from a terminal:
 
    ```bash
-   gh variable set PUBLISHING_ENABLED --body false --repo kailash075/local-news-automation
+   gh variable set PAUSED --body true --repo kailash075/local-news-automation
    ```
 
-3. **Disable the workflows:**
+3. **Remove the `LIVE` file** (Coimbatore 360's way to stop posting): delete it on GitHub (open the file, then the bin icon, then commit), or `git rm LIVE`, commit and push.
+4. **Disable the workflow:**
 
    ```bash
    gh workflow disable publish.yml --repo kailash075/local-news-automation
-   gh workflow disable pipeline.yml --repo kailash075/local-news-automation
    ```
 
-4. **Cancel a run in progress:** `gh run list --workflow publish.yml`, then `gh run cancel <run-id>`.
-5. **Last resort:** remove the app's access to the Instagram account (Instagram settings, apps and websites), or revoke the token in the Meta app dashboard. Publishing then needs a new token (§8).
+5. **Cancel a run in progress:** `gh run list --workflow publish.yml`, then `gh run cancel <run-id>`.
+6. **Last resort:** remove the app's access to the Instagram account (Instagram settings, apps and websites), or revoke the token in the Meta app dashboard. Publishing then needs a new token (§8).
 
 A post whose `media_publish` request had already been sent may still appear. Check the account, then follow runbook 6.A if needed.
 
 ### Automatic trips
 
-The system switches publishing off by itself, and opens an `ops-alert` issue, when it sees:
+The system turns the kill switch on by itself, and opens an `ops-alert` issue, when it sees:
 
 - an authentication or token error;
 - Instagram error 4 / 2207051 (flagged as spam) or 25 / 2207050 (account restricted);
@@ -86,7 +86,7 @@ The system switches publishing off by itself, and opens an `ops-alert` issue, wh
 2. Check the publish queue: approvals older than the TTL have expired, so re-approve anything that should still go out.
 3. Check the live quota with `pnpm run job:ig-check` (Phase 2).
 4. Comment `/killswitch off`. Only `OWNER_GITHUB_LOGIN` is accepted.
-5. Set `PUBLISHING_ENABLED=true` and re-enable workflows if you disabled them.
+5. If you used them: delete the `PAUSED` variable, put the `LIVE` file back, and re-enable `publish.yml`.
 6. Watch the next publish run.
 
 ## 5. Alerts
@@ -281,7 +281,7 @@ The Sheet bridge never deletes rows, so until a retention job is written these p
 
 - Every change goes through a pull request with green CI. Use branch protection if the plan supports it for private repositories.
 - **Merging to `master` deploys.** Scheduled workflows run the latest commit on the default branch at their next trigger.
-- **Risky changes** (publisher, gates, Sheet layout): set `PUBLISHING_ENABLED=false`, merge, run `pipeline.yml` by hand in dry-run mode, check the results, then switch publishing back on.
+- **Risky changes** (publisher, gates, Sheet layout): set `PAUSED` = `true`, merge, run `publish.yml` by hand in dry-run mode, check the results, then delete `PAUSED`.
 - **Sheet layout changes:** add columns only (never rename or remove), in `src/sheet/tables.ts`, then run the manual `migrate.yml` workflow. Jobs check the layout version and refuse to run on a mismatch. After a change to `apps-script/Code.gs`, deploy a new version of the existing web app ([setup guide §4](SETUP_GUIDE.md#4-google-sheet-and-apps-script-bridge-phase-1-approval), step 8).
 - **Dependencies:** Dependabot pull requests are reviewed like any other change; lockfile only, never floating versions.
 
@@ -294,9 +294,9 @@ The Sheet bridge never deletes rows, so until a retention job is written these p
 - [ ] Kill switch tested: each layer blocks a dry-run publish
 - [ ] Reconciliation tested with injected faults in tests
 - [ ] Owner has picked the first story and explicitly approved publishing it
-- [ ] `DRY_RUN=false` and `PUBLISHING_ENABLED=true` set by the owner
+- [ ] Owner added the `LIVE` file and ran **Actions → collect-switch** → `start`
 - [ ] First post checked on Instagram (text, graphic, credit); the permalink is recorded
-- [ ] For two weeks, publishing is started by hand (`workflow_dispatch`) before approval-triggered publishing is switched on
+- [ ] For two weeks, `PUBLISH_ON_APPROVAL` stays off: approved stories go out with the 2-hourly `publish` run or a manual run
 
 ## 12. Periodic reviews
 

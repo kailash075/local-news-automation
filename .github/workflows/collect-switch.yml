@@ -1,0 +1,36 @@
+name: collect-switch
+# Coimbatore 360 "collect-switch", Erode version: one click to pause or start automatic collecting and drafting, from a phone too.
+# Scheduled collect and draft runs check this switch (collecting_enabled in the Sheet's settings tab); manual runs always work.
+# Posting is not touched: approved stories keep being posted while the LIVE file exists.
+# Coimbatore 360 commits a research_free/ENABLED file for this; here the switch is in the Sheet, because the bot never commits.
+# Anyone with write access can pause; only OWNER_GITHUB_LOGIN can start.
+on:
+  workflow_dispatch:
+    inputs:
+      collect:
+        description: "pause = stop automatic collecting and drafting  |  start = automatic collecting again"
+        type: choice
+        options: [pause, start]
+        default: pause
+permissions:
+  contents: read
+concurrency:
+  group: collect-switch
+  cancel-in-progress: false
+jobs:
+  switch:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Set switch
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
+          COLLECT: ${{ inputs.collect }}
+          ACTOR: ${{ github.actor }}
+          OWNER_GITHUB_LOGIN: ${{ vars.OWNER_GITHUB_LOGIN }}
+        run: pnpm run job:collect-switch

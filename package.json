@@ -18,7 +18,7 @@
     "job:draft": "node src/jobs/draft.ts",
     "job:publish": "node src/jobs/publish.ts",
     "job:review-command": "node src/jobs/review-command.ts",
-    "job:switch": "node src/jobs/switch.ts",
+    "job:collect-switch": "node src/jobs/collect-switch.ts",
     "job:status": "node src/jobs/status.ts",
     "job:token-refresh": "node src/jobs/token-refresh.ts",
     "job:migrate": "node src/jobs/migrate.ts",

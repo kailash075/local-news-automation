@@ -181,11 +181,12 @@ describe("Apps Script bridge", () => {
 
   it("reads cells the owner typed by hand as text", async () => {
     const t = await freshSheet();
-    await t.stores.settings.setSwitch("publishing_enabled", false, "kailash075", "start");
+    await t.stores.settings.setSwitch("kill_switch", false, "kailash075", "start");
     const sheet = t.google.spreadsheet.getSheetByName(TABLES.settings.name);
     // Rows the bridge wrote are plain-text cells: a typed TRUE stays the text "TRUE", which is not "true".
+    // An unreadable kill switch counts as on.
     sheet?.type(2, 2, "TRUE");
-    expect(await t.stores.settings.getSwitch("publishing_enabled")).toMatchObject({ enabled: false, reason: "invalid stored value" });
+    expect(await t.stores.settings.getSwitch("kill_switch")).toMatchObject({ enabled: true, reason: "invalid stored value" });
     // A row typed below them has automatic format, so Sheets turns the date into a Date; it is read back as text.
     sheet?.type(3, 1, "collecting_enabled");
     sheet?.type(3, 5, "2026-10-30");

@@ -4,7 +4,7 @@ Tamil-first local news for Erode city and Erode district, posted to the Instagra
 
 The workflow layout follows the Coimbatore 360 auto-posting pattern (collect, draft, publish, switches), with an editor approving every post on a GitHub issue. See [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 
-**Status:** Phase 0, tested locally, not live. Nothing posts until the owner finishes the setup and switches publishing on.
+**Status:** Phase 1 setup, not live. As in Coimbatore 360, nothing posts until the owner adds a `LIVE` file to the repository root, and automatic collecting runs only after **Actions → collect-switch** → `start` ([switches](docs/WORKFLOWS.md#4-switches)). Every post also needs an editor's approval.
 
 ```bash
 pnpm install

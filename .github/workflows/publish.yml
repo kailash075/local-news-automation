@@ -1,10 +1,11 @@
 name: publish
 # Coimbatore 360 "post.yml", Erode version. Publishes at most one approved story per run through the official Instagram API
 # (graph.instagram.com): create container -> wait for FINISHED -> media_publish. Every gate is checked again right before
-# media_publish. Three switches must all be on: repository variable PUBLISHING_ENABLED == "true", the Sheet switch
-# (Actions -> switch, or /killswitch on an issue), and DRY_RUN == "false". A manual run is a dry run unless you untick it.
+# media_publish. Switches, as in Coimbatore 360: real posts happen only while a file named LIVE is in the repository root,
+# and the repository variable PAUSED = "true" stops all posting. A manual run is a dry run unless you untick it.
+# On top of that, every story needs an editor's /approve, and /killswitch on <reason> on any issue stops all posting.
 # Cadence: at most 6 posts a day, 08:00-21:00 IST, 30 minutes apart (owner decision). The 2-hourly schedule only catches up
-# on /schedule'd or spacing-delayed stories; approvals start this workflow directly when PUBLISH_ON_APPROVAL is "true".
+# on /schedule'd or spacing-delayed stories; approvals start this workflow directly when PUBLISH_ON_APPROVAL is "true" (only while live).
 on:
   schedule:
     - cron: "47 8-20/2 * * *"
@@ -23,15 +24,28 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: vars.PUBLISHING_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    if: vars.PAUSED != 'true' || (github.event_name == 'workflow_dispatch' && inputs.dry_run)
     runs-on: ubuntu-slim
     timeout-minutes: 12
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Live?
+        id: live
+        run: |
+          if [ "$DRY_RUN" = "false" ] && [ ! -f LIVE ]; then
+            echo "go=no" >> "$GITHUB_OUTPUT"
+            echo "### publish: not live yet (no LIVE file in the repository root), so nothing is posted" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
       - uses: ./.github/actions/setup
+        if: steps.live.outputs.go == 'yes'
       - name: Publish one due story
+        if: steps.live.outputs.go == 'yes'
         env:
           SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
           SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
@@ -40,8 +54,7 @@ jobs:
           CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           GH_TOKEN: ${{ github.token }}
-          PUBLISHING_ENABLED: ${{ vars.PUBLISHING_ENABLED }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || vars.DRY_RUN }}
+          PAUSED: ${{ vars.PAUSED }}
           POSTING_WINDOW_IST: ${{ vars.POSTING_WINDOW_IST }}
           MAX_POSTS_PER_DAY: ${{ vars.MAX_POSTS_PER_DAY }}
           MIN_MINUTES_BETWEEN_POSTS: ${{ vars.MIN_MINUTES_BETWEEN_POSTS }}

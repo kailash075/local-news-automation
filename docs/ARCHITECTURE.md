@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status, 2026-10-30:** most of this design is implemented, tested and pushed; the Google Sheet and its bridge are live (migrate passed), nothing else runs yet. Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `import-token.yml`, `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
+> **Status, 2026-10-31:** most of this design is implemented, tested and pushed; the Google Sheet, its bridge and Cloudinary are set up, and manual collect and draft runs work. Not live (no `LIVE` file); nothing has been posted. Storage moved from the Supabase plan to a Google Sheet with an Apps Script bridge and Cloudinary images, at the owner's request (same as Coimbatore 360). Not implemented yet: `import-token.yml`, `maintenance.yml`, backups, the editor-tip form, the Claude drafter (Phase 3) and an editor override for the near-duplicate guard.
 > Where a detail depends on an external service, the document says what was checked and what still needs verification.
 
 ## 1. Design drivers
@@ -63,7 +63,7 @@ All workflows call `pnpm run job:<name>`. The split into collect, draft and publ
 | `draft.yml` | from `collect.yml` and `review-command.yml`; safety net every 4 h | check job `ubuntu-slim`; render job `ubuntu-latest` until the runner spike passes | Cluster, triage, template caption, render, open or update review issues | `draft`, no cancel |
 | `review-command.yml` | `issue_comment` (created), with a job-level `if` so only comments starting with `/` from owners, members or collaborators start a runner | `ubuntu-slim` | Parse and authorise the command, record the decision, start `draft.yml` or `publish.yml` | `review-<issue number>` |
 | `publish.yml` | from an approval when `PUBLISH_ON_APPROVAL` is `true`; catch-up every 2 h, 08:47 to 20:47 IST; manual (dry run by default) | `ubuntu-slim` | Publish one due item | `publisher`, no cancel |
-| `switch.yml` | manual | `ubuntu-slim` | Set the Sheet switches for collecting and publishing | `switch` |
+| `collect-switch.yml` | manual | `ubuntu-slim` | Pause or start automatic collecting and drafting (Coimbatore 360's collect-switch; a Sheet switch) | `collect-switch` |
 | `status.yml` | daily 07:13 IST; manual | `ubuntu-slim` | Read-only health report | `status` |
 | `token-refresh.yml` | Mondays 03:17 IST; manual | `ubuntu-slim` | Refresh the long-lived Instagram token | `token` |
 | `import-token.yml` | manual only (Phase 2) | `ubuntu-slim` | One-time encrypted import of a token from a temporary secret | `token` |
@@ -289,7 +289,7 @@ Instagram API with Instagram Login, host `graph.instagram.com`, pinned Graph API
 
 Gates, all evaluated before container creation **and again immediately before `media_publish`**:
 
-1. Publishing enabled in the Sheet (`settings` tab, `publishing_enabled`), repository variable `PUBLISHING_ENABLED == "true"`, and `DRY_RUN != "true"`.
+1. Switches (§7): the `LIVE` file exists, the repository variable `PAUSED` is not `true`, the Sheet's `kill_switch` is off, and this is not a dry run.
 2. An approval exists for the exact current revision hash, is not superseded, is younger than the TTL, and came from an allowlisted editor. R2 stories need `/approve-sensitive`.
 3. The verification level meets the minimum for the risk tier.
 4. The validation report passes; the JPEG's SHA-256 matches the approved render.
@@ -351,7 +351,7 @@ Cells are text: timestamps are UTC ISO strings (`Date.toISOString()`, one fixed 
 
 | Tab | Columns | Rules |
 |---|---|---|
-| `settings` | key, enabled, reason, updated_by, updated_at | Holds `publishing_enabled` and `collecting_enabled`. A missing row or any value other than exactly `true` means off. |
+| `settings` | key, enabled, reason, updated_by, updated_at | Holds `collecting_enabled` (collect-switch) and `kill_switch` (`/killswitch`). A missing row means off: collecting paused, kill switch not pulled. A value other than exactly `true` or `false` counts as the safe state: collecting paused, kill switch on. |
 | `sources` | id, name, kind, url, trust_tier, erode_specific, terms_status, terms_reviewed_by, terms_reviewed_at, terms_notes, allowed_use, llm_input_allowed, link_pattern, fetch_interval_minutes, enabled, etag, last_modified, last_fetched_at, consecutive_failures, updated_at | Mirror of `src/config/sources.ts`; registry columns are overwritten each run, fetch state is kept |
 | `source_items` | id, source_id, canonical_url, url_hash, title, excerpt (≤ 500 chars), language, published_at, fetched_at, content_hash, story_id | unique (source_id, url_hash) |
 | `story_sources` | story_id, source_item_id, relation (`primary`, `corroborating`, `contradicting`), created_at | unique (story_id, source_item_id) |
@@ -375,20 +375,21 @@ Known limits of a Sheet compared with a database: anyone who can edit the Sheet 
 
 ## 7. Kill switch
 
-Publishing requires **all** of the following:
+Publishing requires **all** of the following. The first two are Coimbatore 360's switches ([Workflows §4](WORKFLOWS.md#4-switches)).
 
-1. Repository variable `PUBLISHING_ENABLED` is exactly `true`. Workflows check it in an `if:` before the publish step even starts.
-2. The Sheet switch `publishing_enabled` (`settings` tab) is exactly `true`, read fresh before container creation and again before `media_publish`.
-3. `DRY_RUN` is not `true`. Code defaults to dry run when the variable is missing.
+1. A file named `LIVE` is in the repository root. `publish.yml` checks it before anything else runs, and the publisher checks it again.
+2. The repository variable `PAUSED` is not `true`. The workflow checks it in an `if:`, so a paused schedule starts no runner.
+3. The Sheet's `kill_switch` (`settings` tab) is off, read fresh before container creation and again before `media_publish`.
+4. The run is not a dry run. Manual runs are dry runs unless the box is unticked; the code defaults to dry run when `DRY_RUN` is missing.
 
 Ways to stop publishing:
 
 - An editor comments `/killswitch on <reason>` on any issue. This works from a phone.
-- Set the repository variable to `false` (web UI or `gh variable set`).
-- `gh workflow disable publish.yml` and `pipeline.yml`.
+- Remove the `LIVE` file, or set the repository variable `PAUSED` to `true`.
+- `gh workflow disable publish.yml`.
 - Last resort: revoke the token or remove the app's access in Instagram or Meta settings.
 
-The system trips the Sheet switch automatically on authentication or token errors, a spam or restriction error, two unresolved `publish_unknown` states, an impossible daily count, or a detected duplicate post. Only the owner can switch it back on. The procedure is in the [operations runbook](OPERATIONS.md#4-kill-switch).
+The system turns the kill switch on automatically on authentication or token errors, a spam or restriction error, two unresolved `publish_unknown` states, an impossible daily count, or a detected duplicate post. Only the owner can switch it off. The procedure is in the [operations runbook](OPERATIONS.md#4-kill-switch).
 
 ## 8. Idempotency and retries by stage
 

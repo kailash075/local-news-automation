@@ -145,7 +145,7 @@ describe("gates", () => {
   const draft = makeDraft(story);
   const base: GateInput = {
     now: NOON_IST,
-    switches: { databaseEnabled: true, repoVariableEnabled: true, dryRun: false },
+    switches: { live: true, paused: false, killSwitch: false, dryRun: false },
     story,
     draft,
     currentDraft: draft,
@@ -171,7 +171,9 @@ describe("gates", () => {
   });
 
   it("blocks on each gate", () => {
-    expect(codes({ ...base, switches: { ...base.switches, databaseEnabled: false } })).toContain("kill_switch");
+    expect(codes({ ...base, switches: { ...base.switches, live: false } })).toEqual(["not_live"]);
+    expect(codes({ ...base, switches: { ...base.switches, paused: true } })).toEqual(["paused"]);
+    expect(codes({ ...base, switches: { ...base.switches, killSwitch: true } })).toEqual(["kill_switch"]);
     expect(codes({ ...base, storedRenderSha256: undefined })).toContain("render_mismatch");
     expect(codes({ ...base, validation: { passed: false, problems: ["caption too long"] } })).toContain("validation");
     expect(codes({ ...base, alreadyPublished: true })).toContain("already_published");
@@ -188,7 +190,7 @@ describe("gates", () => {
   });
 
   it("in dry run, operational gates become notes but approval gates still block", () => {
-    const dry = { ...base, switches: { databaseEnabled: false, repoVariableEnabled: false, dryRun: true }, quota: undefined, token: { present: false } };
+    const dry = { ...base, switches: { live: false, paused: true, killSwitch: true, dryRun: true }, quota: undefined, token: { present: false } };
     const r = evaluateGates(dry);
     expect(r.pass && r.mode).toBe("would_publish");
     expect(codes({ ...dry, decisions: [] })).toContain("no_approval");

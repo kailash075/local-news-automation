@@ -25,6 +25,7 @@ await runJob("collect", async ({ env, bridge, stores, clock, count }) => {
 
   const report = await runCollect({
     settings: stores.settings,
+    scheduled: env.GITHUB_EVENT_NAME === "schedule",
     sourceState,
     sourceItems,
     clock,
@@ -32,7 +33,7 @@ await runJob("collect", async ({ env, bridge, stores, clock, count }) => {
     sources: SOURCES,
   });
   if (report.status === "switched_off") {
-    appendSummary(`### collect: switched off\nThe Sheet switch \`collecting_enabled\` is off (${report.reason}). Turn it on with Actions -> switch.`);
+    appendSummary(`### collect: automatic collecting is PAUSED (${report.reason})\nStart it with Actions -> collect-switch -> start. A manual run always collects.`);
     setOutput("new_items", 0);
     return "skipped";
   }

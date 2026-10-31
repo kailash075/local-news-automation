@@ -3,8 +3,8 @@ name: collect
 # keep Erode-district items, store them in the Google Sheet, then start "draft" when something new arrived.
 # Differences on purpose: only sources with a recorded terms review are fetched, robots.txt is obeyed, the bot names itself
 # in its User-Agent, and only a title and a short excerpt are stored (never the article text, never photos).
-# Switches: repository variable COLLECTING_ENABLED must be "true" for scheduled runs (a skipped job costs no minutes),
-# and the Sheet switch "collecting_enabled" must be on (Actions -> switch).
+# Switch, as in Coimbatore 360: a scheduled run collects only while automatic collecting is started (Actions -> collect-switch
+# -> start); otherwise it stops after one Sheet read. A manual run always collects, and is a dry run unless you untick it.
 on:
   schedule:
     - cron: "7 6-22/2 * * *"
@@ -23,7 +23,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   collect:
-    if: github.event_name != 'schedule' || vars.COLLECTING_ENABLED == 'true'
     runs-on: ubuntu-slim
     timeout-minutes: 10
     outputs:
@@ -38,7 +37,6 @@ jobs:
         env:
           SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
           SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
-          COLLECTING_ENABLED: ${{ vars.COLLECTING_ENABLED }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || 'false' }}
           MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
         run: pnpm run job:collect
