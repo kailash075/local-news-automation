@@ -1,8 +1,8 @@
 import { uuidv7 } from "../lib/ids.ts";
-import type { Clock, Stores } from "../domain/ports.ts";
+import type { Clock, StoryAttachment, Stores } from "../domain/ports.ts";
 import { transition, type StoryEventType } from "../domain/story-state.ts";
 import { StoryIdSchema, type Source, type SourceItem, type Story, type StoryId } from "../domain/types.ts";
-import { clusterItems } from "../pipeline/cluster.ts";
+import { clusterItems, type ExistingStory } from "../pipeline/cluster.ts";
 import { assessFreshness } from "../pipeline/freshness.ts";
 import { assessRelevance } from "../pipeline/relevance.ts";
 import { assessRuleRisk, finalTier } from "../pipeline/risk.ts";
@@ -69,24 +69,31 @@ const buildStory = (id: StoryId, item: SourceItem, places: readonly string[], de
 };
 
 /** Evidence derived from sources only: an official source, or two different organisations. Never from AI. */
-const refreshEvidence = async (deps: TriageDeps, storyId: StoryId): Promise<void> => {
-  const items = await deps.stores.sourceItems.listForStory(storyId);
-  const existing = await deps.stores.evidence.listFor(storyId);
-  const official = items.find((i) => deps.sourceFor(i.sourceId)?.trustTier === "T1_official");
-  if (official !== undefined && !existing.some((e) => e.kind === "official_source")) {
-    await deps.stores.evidence.add(storyId, { kind: "official_source", sourceItemId: official.id });
-  }
-  const bySource = new Map<string, SourceItem>();
-  for (const i of items) {
-    const kind = deps.sourceFor(i.sourceId)?.kind;
-    if (kind !== undefined && kind !== "editor_tip" && !bySource.has(i.sourceId)) bySource.set(i.sourceId, i);
-  }
-  const [first, second, ...rest] = [...bySource.values()];
-  if (first !== undefined && second !== undefined && !existing.some((e) => e.kind === "independent_corroboration")) {
-    await deps.stores.evidence.add(storyId, {
-      kind: "independent_corroboration",
-      sourceItemIds: [first.id, second.id, ...rest.map((i) => i.id)],
-    });
+const refreshEvidence = async (deps: TriageDeps, storyIds: readonly StoryId[]): Promise<void> => {
+  if (storyIds.length === 0) return;
+  const [itemsByStory, evidenceByStory] = await Promise.all([
+    deps.stores.sourceItems.listForStories(storyIds),
+    deps.stores.evidence.listForStories(storyIds),
+  ]);
+  for (const storyId of storyIds) {
+    const items = itemsByStory.get(storyId) ?? [];
+    const existing = evidenceByStory.get(storyId) ?? [];
+    const official = items.find((i) => deps.sourceFor(i.sourceId)?.trustTier === "T1_official");
+    if (official !== undefined && !existing.some((e) => e.kind === "official_source")) {
+      await deps.stores.evidence.add(storyId, { kind: "official_source", sourceItemId: official.id });
+    }
+    const bySource = new Map<string, SourceItem>();
+    for (const i of items) {
+      const kind = deps.sourceFor(i.sourceId)?.kind;
+      if (kind !== undefined && kind !== "editor_tip" && !bySource.has(i.sourceId)) bySource.set(i.sourceId, i);
+    }
+    const [first, second, ...rest] = [...bySource.values()];
+    if (first !== undefined && second !== undefined && !existing.some((e) => e.kind === "independent_corroboration")) {
+      await deps.stores.evidence.add(storyId, {
+        kind: "independent_corroboration",
+        sourceItemIds: [first.id, second.id, ...rest.map((i) => i.id)],
+      });
+    }
   }
 };
 
@@ -94,11 +101,15 @@ const refreshEvidence = async (deps: TriageDeps, storyId: StoryId): Promise<void
  * Turns new source items into stories: Erode relevance (neighbour-only items are dropped), clustering with recent
  * stories, topic and rule-based risk, freshness. Items that are not about Erode, or already stale, become discarded
  * stories so they are not looked at again.
+ * The new stories and their links are written together at the end, in a few Sheet requests however many items arrived.
  */
 export const runTriage = async (deps: TriageDeps): Promise<TriageReport> => {
   const now = deps.clock.now();
   const items = await deps.stores.sourceItems.listUnassigned(BATCH);
   const lines: string[] = [];
+  const stories: Story[] = [];
+  const attachments: StoryAttachment[] = [];
+  const discardedNow: ExistingStory[] = [];
   let newStories = 0;
   let attached = 0;
   let discarded = 0;
@@ -127,32 +138,38 @@ export const runTriage = async (deps: TriageDeps): Promise<TriageReport> => {
       firstSeenAt: toIso(now),
       updatedAt: toIso(now),
     };
-    await deps.stores.stories.insert(apply(base, ["discard"], now));
-    await deps.stores.sourceItems.attachToStory(item.id, id, "primary");
+    stories.push(apply(base, ["discard"], now));
+    attachments.push({ itemId: item.id, storyId: id, relation: "primary" });
+    discardedNow.push({ story: { id }, items: [item] });
     discarded += 1;
   }
 
-  const existing = await deps.stores.stories.listRecentWithItems(toIso(new Date(now.getTime() - CLUSTER_LOOKBACK_MS)));
+  // Recent stories in the Sheet, plus the ones just discarded (not written yet), as candidates to join.
+  const recent = relevant.length === 0 ? [] : await deps.stores.stories.listRecentWithItems(toIso(new Date(now.getTime() - CLUSTER_LOOKBACK_MS)));
+  const existing = [...recent, ...discardedNow];
   const decisions = clusterItems(relevant, existing, () => StoryIdSchema.parse(uuidv7(now)));
   const created = new Set<StoryId>();
   const touched = new Set<StoryId>();
   for (const d of decisions) {
     if (d.isNewStory && !created.has(d.storyId)) {
       const { story, note } = buildStory(d.storyId, d.item, placesByItem.get(d.item.id) ?? [], deps, now);
-      await deps.stores.stories.insert(story);
-      await deps.stores.sourceItems.attachToStory(d.item.id, d.storyId, "primary");
+      stories.push(story);
+      attachments.push({ itemId: d.item.id, storyId: d.storyId, relation: "primary" });
       created.add(d.storyId);
       if (story.status === "discarded") discarded += 1;
       else newStories += 1;
       const dupes = d.possibleDuplicates.length === 0 ? "" : ` (possible duplicate of ${d.possibleDuplicates.length} story/stories)`;
       lines.push(`- new story: ${d.item.title.slice(0, 80)} [${note}]${dupes}`);
     } else {
-      await deps.stores.sourceItems.attachToStory(d.item.id, d.storyId, "corroborating");
+      attachments.push({ itemId: d.item.id, storyId: d.storyId, relation: "corroborating" });
       attached += 1;
     }
     touched.add(d.storyId);
   }
-  for (const id of touched) await refreshEvidence(deps, id);
+  // Stories before their links, so a link never points at a missing story.
+  await deps.stores.stories.insertMany(stories);
+  await deps.stores.sourceItems.attachToStories(attachments);
+  await refreshEvidence(deps, [...touched]);
 
   return { items: items.length, newStories, attached, discarded, lines };
 };

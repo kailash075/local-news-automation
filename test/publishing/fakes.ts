@@ -254,6 +254,10 @@ export const memoryStories = (initial: readonly Story[]): StoryStore & { rows: M
       rows.set(story.id, story);
       return Promise.resolve();
     },
+    insertMany: (stories) => {
+      for (const story of stories) rows.set(story.id, story);
+      return Promise.resolve();
+    },
     get: (id) => Promise.resolve(rows.get(id)),
     update: (story, expectedVersion) => {
       const current = rows.get(story.id);
@@ -268,16 +272,26 @@ export const memoryStories = (initial: readonly Story[]): StoryStore & { rows: M
   };
 };
 
+/** The `...ForStories` answer: only stories with entries. */
+const perStory = <T>(storyIds: readonly StoryId[], list: (storyId: StoryId) => T | undefined): ReadonlyMap<StoryId, T> =>
+  new Map(storyIds.flatMap((id) => {
+    const entry = list(id);
+    return entry === undefined ? [] : [[id, entry] as const];
+  }));
+
+const nonEmpty = <T>(list: readonly T[]): readonly T[] | undefined => (list.length === 0 ? undefined : list);
+
 export const memoryDrafts = (initial: readonly DraftRevision[]): DraftStore => {
   const rows = [...initial];
+  const latest = (storyId: StoryId) => rows.filter((d) => d.storyId === storyId).sort((a, b) => b.revision - a.revision)[0];
   return {
     insert: (d) => {
       rows.push(d);
       return Promise.resolve();
     },
     get: (id) => Promise.resolve(rows.find((d) => d.id === id)),
-    latestFor: (storyId) =>
-      Promise.resolve(rows.filter((d) => d.storyId === storyId).sort((a, b) => b.revision - a.revision)[0]),
+    latestFor: (storyId) => Promise.resolve(latest(storyId)),
+    latestForStories: (storyIds) => Promise.resolve(perStory(storyIds, latest)),
   };
 };
 
@@ -290,12 +304,14 @@ export const memoryDecisions = (initial: readonly EditorialDecision[]): Decision
       return Promise.resolve({ recorded: true });
     },
     listFor: (storyId) => Promise.resolve(rows.filter((d) => d.storyId === storyId)),
+    listForStories: (storyIds) => Promise.resolve(perStory(storyIds, (id) => nonEmpty(rows.filter((d) => d.storyId === id)))),
   };
 };
 
 export const memoryEvidence = (byStory: ReadonlyMap<StoryId, readonly VerificationEvidence[]>): EvidenceStore => ({
   add: () => Promise.resolve(),
   listFor: (storyId) => Promise.resolve(byStory.get(storyId) ?? []),
+  listForStories: (storyIds) => Promise.resolve(perStory(storyIds, (id) => nonEmpty(byStory.get(id) ?? []))),
 });
 
 export const memoryTokens = (initial: InstagramCredentials | undefined): TokenStore => {

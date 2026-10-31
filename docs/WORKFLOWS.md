@@ -27,6 +27,7 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 | Separate workflows for collect, write and post, each with its own concurrency group | `collect.yml`, `draft.yml`, `publish.yml`, each with its own concurrency group |
 | The collector starts the writer when there is news, instead of waiting for the next schedule | `collect.yml` starts `draft.yml` only when new items arrived |
 | Watchdog, because GitHub sometimes skips scheduled runs | `draft.yml` keeps a 4-hourly safety-net schedule; every job can be rerun safely |
+| A cheap check job before the expensive one (`post.yml`) | A scheduled `draft.yml` run checks first and starts the Chromium job only when there is work. Runs started by `collect` or `review-command` skip the check, because they always have work. |
 | One-click pause and start (`collect-switch`, `LIVE` file, `PAUSED` variable) | The same three switches, used the same way. See §4. |
 | Manual runs of the poster are test-only by default (`dry_run`) | `publish.yml` and `collect.yml` manual runs are dry runs unless you untick the box |
 | "Setup not finished" exit when secrets are missing | Every job checks its configuration and exits cleanly with a clear message |
@@ -40,7 +41,7 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 | Google Sheet as the working store, reached through an Apps Script web app with a key | Same idea: one tab per table in the `ErodeGlitz Newsroom` Sheet, reached only through `apps-script/Code.gs` (written for ErodeGlitz). The key travels in the request body, not the URL; writes hold the script lock; decisions, evidence and errors are append-only. Owner decision, 2026-10-30. |
 | Images on Cloudinary, so Instagram can download them | Same, with signed uploads (no unsigned preset) |
 | Regression tests named after real incidents, run on every push | `ci.yml` runs typecheck, lint and Vitest on every push |
-| Finished media kept so a retry does not rebuild | Rendered cards are content-addressed on Cloudinary (the name is the image's SHA-256); a rerun reuses them |
+| Finished media kept so a retry does not rebuild | Rendered cards are content-addressed on Cloudinary (named by a SHA-256 of the card's template version and text); a rerun reuses them |
 | Official Instagram API (`graph.instagram.com`, `media` then `media_publish`) | Same API, same login type |
 
 ## 3. What ErodeGlitz deliberately does differently
@@ -84,13 +85,13 @@ ErodeGlitz adds two safeguards, because the owner's rules require them:
 
 ## 5. Schedules and cost
 
-All times IST (`timezone: "Asia/Kolkata"` on each cron entry). The minutes are estimates until the Phase 0 runner spike measures them.
+All times IST (`timezone: "Asia/Kolkata"` on each cron entry). The minutes are estimates for the code as of 2026-10-31 (see the measurements below the table); recheck them against real runs in the first week after collecting starts.
 
 | Workflow | When | Runner | Runs a month | Minutes a month (est.) |
 |---|---|---|---|---|
-| `collect.yml` | 06:07 to 22:07, every 2 h | `ubuntu-slim` | about 270 | about 540 |
-| `draft.yml`, check job | after `collect` when something is new; safety net 07:37 to 19:37, every 4 h | `ubuntu-slim` | about 390 | about 390 |
-| `draft.yml`, render job | only when the check finds work | `ubuntu-latest` (Chromium) | about 180 | about 360 |
+| `collect.yml` | 06:07 to 22:07, every 2 h | `ubuntu-slim` | about 270 | about 300 |
+| `draft.yml`, check job | safety net only: 07:37 to 19:37, every 4 h | `ubuntu-slim` | about 120 | about 120 |
+| `draft.yml`, render job | after `collect` when something is new, after `/caption` or `/headline`, and when the safety-net check finds work | `ubuntu-latest` (Chromium) | about 400 | about 500 |
 | `review-command.yml` | each editor command | `ubuntu-slim` | about 600 | about 600 |
 | `publish.yml` | after an approval; catch-up 08:47 to 20:47, every 2 h | `ubuntu-slim` | about 390 | about 390 |
 | `status.yml` | daily 07:13 | `ubuntu-slim` | 30 | 30 |
@@ -101,9 +102,15 @@ GitHub rounds each job up to a whole minute, so even a job that exits at once co
 
 Like Coimbatore 360, scheduled runs start every time and check their switch inside the job. While collecting is paused and the page is not live, each scheduled run still costs about one minute: `collect` 270, `draft` check 120, `publish` 210, `status` 30 and `token-refresh` 4, so about 630 minutes a month (about USD 1.30 at the `ubuntu-slim` rate below). Setting `PAUSED` = `true` skips the `publish` job entirely.
 
-Rough monthly cost against the USD 12 included on GitHub Free: `ubuntu-slim` about 1,950 minutes × USD 0.002 ≈ USD 3.90; `ubuntu-latest` about 460 minutes × USD 0.006 ≈ USD 2.80; total about USD 6.70. That is a little above the 50% target in the [operations runbook](OPERATIONS.md#9-cost-monitoring-and-budgets). The Phase 0 runner spike measures the real durations; if Chromium works on `ubuntu-slim`, the render job moves there and the total drops to about USD 5.
+Rough monthly cost against the USD 12 included on GitHub Free, once collecting is started: `ubuntu-slim` about 1,450 minutes × USD 0.002 ≈ USD 2.90; `ubuntu-latest` about 600 minutes × USD 0.006 ≈ USD 3.60; total about USD 6.50. That is a little above the 50% target in the [operations runbook](OPERATIONS.md#9-cost-monitoring-and-budgets). If Chromium works on `ubuntu-slim` (Phase 0 runner spike), the render job moves there and the total drops to about USD 4.
 
-The Google Sheet adds time: each bridge call takes about 1–2 seconds, and a draft run makes several calls per new item. These estimates assume most runs still finish within a minute or two; recheck them against real run times in the first week of Phase 1.
+What keeps a job near one minute (changed 2026-10-31):
+
+- **Setup takes seconds.** Jobs use the Node.js that is already on the runner (`.node-version` is 24, the version on `ubuntu-slim`), and restore their three production packages from the Actions cache. pnpm only runs when `pnpm-lock.yaml` changes, and in `ci.yml`.
+- **The Sheet is read and written in bulk.** Each bridge call takes 1–2 seconds, so the jobs no longer make calls per story: the draft check makes 5, a draft run with nothing new 6 and triage 7, whether 2 or 100 stories are open, and `collect` makes one fetch-state read plus one item write per source. `test/sheet-requests.test.ts` pins these numbers.
+- **`collect` fetches the five newspapers at the same time,** still one request at a time per site.
+
+Measured before that change (2026-10-30 and 31): setup 25–67 s per job; the first real `collect` 5.5 min (49 new items); draft checks 2.5–3 min and draft runs 3–5 min on the first day, growing with every open story. At that rate a month would have cost roughly USD 15, more than the free allowance.
 
 ## 6. What the owner does each day (once live)
 

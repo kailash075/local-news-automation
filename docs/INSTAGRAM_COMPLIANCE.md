@@ -71,7 +71,7 @@ How the project applies this is described in [Architecture §5.10](ARCHITECTURE.
 | Aspect ratio | 4:5 to 1.91:1 | 4:5 (1080×1350) |
 | Width | 320 to 1440 px (scaled outside that range) | 1080 px |
 | Colour space | sRGB (others are converted) | sRGB |
-| Image URL | Must be publicly reachable when the container is created; US-ASCII URLs are safest | Public, ASCII-only Cloudinary URL whose name is the image's SHA-256 (cannot be guessed) |
+| Image URL | Must be publicly reachable when the container is created; US-ASCII URLs are safest | Public, ASCII-only Cloudinary URL named by a SHA-256 of the card's template version and text (cannot be guessed without the exact card text) |
 | Carousel size | **Conflicting:** the guide says up to 20 items; error 2207028 says 2 to 10 | Not used until Phase 4; verify first |
 | API calls | "Calls within 24 hours = 4800 * Number of Impressions", per app and user pair | A handful of calls per post; a new account with few impressions has a low ceiling, so avoid unnecessary calls |
 

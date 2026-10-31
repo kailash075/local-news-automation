@@ -39,6 +39,24 @@ export const testSource = (overrides: Partial<Source> = {}): Source =>
     ...overrides,
   });
 
+/** An enabled source whose terms review is approved and current on the test clock's date. */
+export const approvedSource = (id: string, url: string): Source =>
+  SourceSchema.parse({
+    ...testSource(),
+    id,
+    name: id,
+    url,
+    enabled: true,
+    termsReview: {
+      status: "approved",
+      reviewedBy: "kailash075",
+      reviewedAt: "2026-10-01T00:00:00.000Z",
+      notes: "Reviewed",
+      allowedUse: "facts_with_attribution",
+      llmInputAllowed: false,
+    },
+  });
+
 export const newSourceItem = (seed: string, at: Date, overrides: Partial<NewSourceItem> = {}): NewSourceItem => ({
   sourceId: TEST_SOURCE_ID,
   canonicalUrl: `https://example.org/erode/${encodeURIComponent(seed)}`,

@@ -33,4 +33,4 @@ jobs:
           COLLECT: ${{ inputs.collect }}
           ACTOR: ${{ github.actor }}
           OWNER_GITHUB_LOGIN: ${{ vars.OWNER_GITHUB_LOGIN }}
-        run: pnpm run job:collect-switch
+        run: node src/jobs/collect-switch.ts

@@ -9,9 +9,10 @@ import type {
   PublicationStore,
   ReviewThreadStore,
   SettingsStore,
-  SourceFetchState,
+  NewSourceItem,
   SourceItemStore,
   SourceStateStore,
+  StoryAttachment,
   Stores,
   StoryStore,
   SwitchKey,
@@ -37,6 +38,7 @@ import {
   type Source,
   type SourceItem,
   type Story,
+  type StoryId,
   type VerificationEvidence,
 } from "../domain/types.ts";
 import { decryptSecret, encryptSecret } from "../lib/crypto.ts";
@@ -108,13 +110,43 @@ const byColumns =
   };
 
 /**
- * Inserts one row keyed by `id`. A row with the same id is our own earlier request whose answer was lost, so it
- * counts as inserted; any other clash on the unique key is reported.
+ * Inserts rows keyed by `id`, one result per row. A row with the same id is our own earlier request whose answer was
+ * lost, so it counts as inserted; any other clash on the unique key is reported.
  */
-const insertOnce = async (bridge: BridgeClient, table: string, row: Row, unique: readonly string[] = ["id"]): Promise<boolean> => {
-  const [result] = await bridge.insert(table, [row], { unique });
-  if (result === undefined) throw new Error(`bridge returned no result for insert into ${table}`);
-  return result.inserted || cellOf(result.existing, "id") === cellOf(row, "id");
+const insertRows = async (bridge: BridgeClient, table: string, rows: readonly Row[], unique: readonly string[] = ["id"]): Promise<readonly boolean[]> => {
+  const results = await bridge.insert(table, rows, { unique });
+  if (results.length !== rows.length) throw new Error(`bridge returned ${results.length} results for ${rows.length} rows inserted into ${table}`);
+  return rows.map((row, i) => {
+    const result = results[i];
+    return result !== undefined && (result.inserted || cellOf(result.existing, "id") === cellOf(row, "id"));
+  });
+};
+
+const insertOnce = async (bridge: BridgeClient, table: string, row: Row, unique: readonly string[] = ["id"]): Promise<boolean> =>
+  (await insertRows(bridge, table, [row], unique))[0] === true;
+
+/** Loads at most once per job and shares the request between concurrent callers. A failed load is tried again next time. */
+const lazy = <T>(load: () => Promise<T>): (() => Promise<T>) => {
+  let pending: Promise<T> | undefined;
+  return () =>
+    (pending ??= load().catch((error: unknown) => {
+      pending = undefined;
+      throw error;
+    }));
+};
+
+/** Rows grouped by their story_id, under the ids the caller asked for, in row order. */
+const groupByStory = <T>(storyIds: readonly StoryId[], rows: readonly Row[], map: (row: Row) => T): Map<StoryId, T[]> => {
+  const wanted = new Map<string, StoryId>(storyIds.map((id) => [id, id]));
+  const groups = new Map<StoryId, T[]>();
+  for (const row of rows) {
+    const id = wanted.get(cellOf(row, "story_id"));
+    if (id === undefined) continue;
+    const group = groups.get(id) ?? [];
+    group.push(map(row));
+    groups.set(id, group);
+  }
+  return groups;
 };
 
 // ---------------------------------------------------------------- mapping
@@ -359,50 +391,67 @@ const createSettingsStore = (bridge: BridgeClient, clock: Clock): SettingsStore 
   },
 });
 
-const createSourceStateStore = (bridge: BridgeClient): SourceStateStore => ({
-  getFetchState: async (sourceId) => {
-    const [row] = await bridge.select(TABLES.sources.name, { id: sourceId }, ["etag", "last_modified", "last_fetched_at", "consecutive_failures"]);
-    if (row === undefined) return { sourceId, consecutiveFailures: 0 };
-    const state: SourceFetchState = {
-      sourceId,
-      ...opt("etag", cellOf(row, "etag"), (v) => v),
-      ...opt("lastModified", cellOf(row, "last_modified"), (v) => v),
-      ...opt("lastFetchedAt", cellOf(row, "last_fetched_at"), iso),
-      consecutiveFailures: cellOf(row, "consecutive_failures") === "" ? 0 : intOf(row, "consecutive_failures"),
-    };
-    return state;
-  },
-  saveFetchState: async (state) => {
-    const updated = await bridge.update(
-      TABLES.sources.name,
-      { id: state.sourceId },
-      {
-        etag: state.etag ?? "",
-        last_modified: state.lastModified ?? "",
-        last_fetched_at: tsOrEmpty(state.lastFetchedAt),
-        consecutive_failures: String(state.consecutiveFailures),
-      },
-    );
-    if (updated.length === 0) throw new Error(`source ${state.sourceId} is not in the sources tab; run syncSources with the registry first`);
-  },
-});
+/**
+ * Reads every source's fetch state in one request, the first time a job asks, and keeps it up to date with the job's own
+ * saves. Only the collect workflow writes fetch state, and it never runs twice at once.
+ */
+const createSourceStateStore = (bridge: BridgeClient): SourceStateStore => {
+  const rowsById = lazy(async () => {
+    const rows = await bridge.select(TABLES.sources.name, undefined, ["id", "etag", "last_modified", "last_fetched_at", "consecutive_failures"]);
+    return new Map(rows.map((row) => [cellOf(row, "id"), row]));
+  });
+  return {
+    getFetchState: async (sourceId) => {
+      const row = (await rowsById()).get(sourceId);
+      if (row === undefined) return { sourceId, consecutiveFailures: 0 };
+      return {
+        sourceId,
+        ...opt("etag", cellOf(row, "etag"), (v) => v),
+        ...opt("lastModified", cellOf(row, "last_modified"), (v) => v),
+        ...opt("lastFetchedAt", cellOf(row, "last_fetched_at"), iso),
+        consecutiveFailures: cellOf(row, "consecutive_failures") === "" ? 0 : intOf(row, "consecutive_failures"),
+      };
+    },
+    saveFetchState: async (state) => {
+      const [updated] = await bridge.update(
+        TABLES.sources.name,
+        { id: state.sourceId },
+        {
+          etag: state.etag ?? "",
+          last_modified: state.lastModified ?? "",
+          last_fetched_at: tsOrEmpty(state.lastFetchedAt),
+          consecutive_failures: String(state.consecutiveFailures),
+        },
+      );
+      if (updated === undefined) throw new Error(`source ${state.sourceId} is not in the sources tab; run syncSources with the registry first`);
+      (await rowsById()).set(state.sourceId, updated);
+    },
+  };
+};
+
+/** Links per bridge batch: one insert plus two updates per link stay under the bridge's 50 operations. */
+const ATTACHMENTS_PER_BATCH = 24;
 
 const createSourceItemStore = (bridge: BridgeClient, clock: Clock): SourceItemStore => {
   const table = TABLES.sourceItems.name;
-  /** (source, url hash) pairs already in the Sheet. Rows are never deleted, so a known pair stays known. */
-  let known: Set<string> | undefined;
   const keyOf = (sourceId: string, urlHash: string): string => `${sourceId} ${urlHash}`;
-  const knownKeys = async (): Promise<Set<string>> =>
-    (known ??= new Set((await bridge.select(table, undefined, ["source_id", "url_hash"])).map((r) => keyOf(cellOf(r, "source_id"), cellOf(r, "url_hash")))));
+  /** (source, url hash) pairs already in the Sheet. Rows are never deleted, so a known pair stays known. */
+  const knownKeys = lazy(async () =>
+    new Set((await bridge.select(table, undefined, ["source_id", "url_hash"])).map((r) => keyOf(cellOf(r, "source_id"), cellOf(r, "url_hash")))),
+  );
 
-  return {
-    isKnown: async (sourceId, urlHash) => (await knownKeys()).has(keyOf(sourceId, urlHash)),
-    insertIfNew: async (item) => {
-      const keys = await knownKeys();
+  const insertManyIfNew = async (items: readonly NewSourceItem[]): Promise<readonly SourceItem[]> => {
+    const keys = await knownKeys();
+    const fresh = new Set<string>();
+    const rows: Row[] = [];
+    const start = clock.now().getTime();
+    for (const item of items) {
       const key = keyOf(item.sourceId, item.urlHash);
-      if (keys.has(key)) return { inserted: false };
-      const row: Row = {
-        id: uuidv7(clock.now()),
+      if (keys.has(key) || fresh.has(key)) continue;
+      fresh.add(key);
+      rows.push({
+        // One millisecond apart, so the ids keep the order given (the page's order), as one-by-one inserts did.
+        id: uuidv7(new Date(start + rows.length)),
         source_id: item.sourceId,
         canonical_url: item.canonicalUrl,
         url_hash: item.urlHash,
@@ -413,36 +462,75 @@ const createSourceItemStore = (bridge: BridgeClient, clock: Clock): SourceItemSt
         fetched_at: ts(item.fetchedAt),
         content_hash: item.contentHash,
         story_id: "",
-      };
-      const inserted = await insertOnce(bridge, table, row, ["source_id", "url_hash"]);
-      keys.add(key);
-      return inserted ? { inserted: true, item: sourceItemFromRow(row) } : { inserted: false };
+      });
+    }
+    if (rows.length === 0) return [];
+    const inserted = await insertRows(bridge, table, rows, ["source_id", "url_hash"]);
+    for (const key of fresh) keys.add(key);
+    return rows.filter((_, i) => inserted[i] === true).map(sourceItemFromRow);
+  };
+
+  const attachToStories = async (attachments: readonly StoryAttachment[]): Promise<void> => {
+    const createdAt = ts(clock.now());
+    const link = (a: StoryAttachment) => ({ story_id: a.storyId, source_item_id: a.itemId });
+    for (let i = 0; i < attachments.length; i += ATTACHMENTS_PER_BATCH) {
+      const chunk = attachments.slice(i, i + ATTACHMENTS_PER_BATCH);
+      await bridge.batch([
+        {
+          op: "insert",
+          table: TABLES.storySources.name,
+          rows: chunk.map((a) => ({ ...link(a), relation: a.relation, created_at: createdAt })),
+          unique: ["story_id", "source_item_id"],
+        },
+        ...chunk.flatMap((a) => [
+          { op: "update", table: TABLES.storySources.name, where: link(a), set: { relation: a.relation } } as const,
+          { op: "update", table, where: { id: a.itemId, story_id: null }, set: { story_id: a.storyId } } as const,
+        ]),
+      ]);
+    }
+  };
+
+  const listForStories = async (storyIds: readonly StoryId[]): Promise<ReadonlyMap<StoryId, readonly SourceItem[]>> => {
+    if (storyIds.length === 0) return new Map();
+    const links = await bridge.select(TABLES.storySources.name, { story_id: storyIds }, ["story_id", "source_item_id"]);
+    if (links.length === 0) return new Map();
+    const rows = await bridge.select(table, { id: [...new Set(links.map((l) => cellOf(l, "source_item_id")))] });
+    const items = [...rows].sort(byColumns("fetched_at", "id")).map(sourceItemFromRow);
+    const byStory = new Map<StoryId, readonly SourceItem[]>();
+    for (const [storyId, itemIds] of groupByStory(storyIds, links, (l) => cellOf(l, "source_item_id"))) {
+      const mine = new Set(itemIds);
+      byStory.set(storyId, items.filter((item) => mine.has(item.id)));
+    }
+    return byStory;
+  };
+
+  return {
+    isKnown: async (sourceId, urlHash) => (await knownKeys()).has(keyOf(sourceId, urlHash)),
+    insertIfNew: async (item) => {
+      const [stored] = await insertManyIfNew([item]);
+      return stored === undefined ? { inserted: false } : { inserted: true, item: stored };
     },
+    insertManyIfNew,
     listUnassigned: async (limit) =>
       [...(await bridge.select(table, { story_id: null }))].sort(byColumns("fetched_at", "id")).slice(0, limit).map(sourceItemFromRow),
-    attachToStory: async (itemId, storyId, relation) => {
-      const link = { story_id: storyId, source_item_id: itemId };
-      await bridge.batch([
-        { op: "insert", table: TABLES.storySources.name, rows: [{ ...link, relation, created_at: ts(clock.now()) }], unique: ["story_id", "source_item_id"] },
-        { op: "update", table: TABLES.storySources.name, where: link, set: { relation } },
-        { op: "update", table, where: { id: itemId, story_id: null }, set: { story_id: storyId } },
-      ]);
-    },
-    listForStory: async (storyId) => {
-      const links = await bridge.select(TABLES.storySources.name, { story_id: storyId }, ["source_item_id"]);
-      if (links.length === 0) return [];
-      const items = await bridge.select(table, { id: links.map((l) => cellOf(l, "source_item_id")) });
-      return [...items].sort(byColumns("fetched_at", "id")).map(sourceItemFromRow);
-    },
+    attachToStory: (itemId, storyId, relation) => attachToStories([{ itemId, storyId, relation }]),
+    attachToStories,
+    listForStory: async (storyId) => (await listForStories([storyId])).get(storyId) ?? [],
+    listForStories,
   };
 };
 
 const createStoryStore = (bridge: BridgeClient): StoryStore => {
   const table = TABLES.stories.name;
+  const insertMany = async (stories: readonly Story[]): Promise<void> => {
+    if (stories.length === 0) return;
+    const inserted = await insertRows(bridge, table, stories.map(storyRow));
+    const clash = stories.find((_, i) => inserted[i] !== true);
+    if (clash !== undefined) throw new Error(`story ${clash.id} already exists`);
+  };
   return {
-    insert: async (story) => {
-      if (!(await insertOnce(bridge, table, storyRow(story)))) throw new Error(`story ${story.id} already exists`);
-    },
+    insert: (story) => insertMany([story]),
+    insertMany,
     get: async (id) => {
       const [row] = await bridge.select(table, { id });
       return row === undefined ? undefined : storyFromRow(row);
@@ -492,6 +580,14 @@ const createStoryStore = (bridge: BridgeClient): StoryStore => {
 
 const createDraftStore = (bridge: BridgeClient): DraftStore => {
   const table = TABLES.drafts.name;
+  const latestForStories = async (storyIds: readonly StoryId[]): Promise<ReadonlyMap<StoryId, DraftRevision>> => {
+    const latest = new Map<StoryId, DraftRevision>();
+    if (storyIds.length === 0) return latest;
+    for (const [storyId, drafts] of groupByStory(storyIds, await bridge.select(table, { story_id: storyIds }), draftFromRow)) {
+      latest.set(storyId, drafts.reduce((best, d) => (d.revision > best.revision ? d : best)));
+    }
+    return latest;
+  };
   return {
     insert: async (d) => {
       const [result] = await bridge.insert(table, [draftRow(d)], {
@@ -504,69 +600,88 @@ const createDraftStore = (bridge: BridgeClient): DraftStore => {
       const [row] = await bridge.select(table, { id });
       return row === undefined ? undefined : draftFromRow(row);
     },
-    latestFor: async (storyId) => {
-      const drafts = (await bridge.select(table, { story_id: storyId })).map(draftFromRow);
-      return drafts.reduce<DraftRevision | undefined>((best, d) => (best === undefined || d.revision > best.revision ? d : best), undefined);
-    },
+    latestFor: async (storyId) => (await latestForStories([storyId])).get(storyId),
+    latestForStories,
   };
 };
 
-const createEvidenceStore = (bridge: BridgeClient, clock: Clock): EvidenceStore => ({
-  add: async (storyId, evidence) => {
-    const now = clock.now();
-    const base = { id: uuidv7(now), story_id: storyId, kind: evidence.kind, created_at: ts(now) };
-    switch (evidence.kind) {
-      case "official_source":
-        await insertOnce(bridge, TABLES.evidence.name, { ...base, source_item_ids: JSON.stringify([evidence.sourceItemId]) });
-        return;
-      case "independent_corroboration":
-        await insertOnce(bridge, TABLES.evidence.name, { ...base, source_item_ids: JSON.stringify(evidence.sourceItemIds) });
-        return;
-      case "editor_attestation":
-        await insertOnce(bridge, TABLES.evidence.name, {
-          ...base,
-          editor_login: evidence.editorLogin,
-          method: evidence.method,
-          attested_at: ts(evidence.attestedAt),
-        });
-        return;
-    }
-  },
-  listFor: async (storyId) =>
-    [...(await bridge.select(TABLES.evidence.name, { story_id: storyId }))].sort(byColumns("created_at", "id")).map(evidenceFromRow),
-});
+const createEvidenceStore = (bridge: BridgeClient, clock: Clock): EvidenceStore => {
+  const listForStories = async (storyIds: readonly StoryId[]): Promise<ReadonlyMap<StoryId, readonly VerificationEvidence[]>> => {
+    if (storyIds.length === 0) return new Map();
+    const rows = [...(await bridge.select(TABLES.evidence.name, { story_id: storyIds }))].sort(byColumns("created_at", "id"));
+    return groupByStory(storyIds, rows, evidenceFromRow);
+  };
+  return {
+    add: async (storyId, evidence) => {
+      const now = clock.now();
+      const base = { id: uuidv7(now), story_id: storyId, kind: evidence.kind, created_at: ts(now) };
+      switch (evidence.kind) {
+        case "official_source":
+          await insertOnce(bridge, TABLES.evidence.name, { ...base, source_item_ids: JSON.stringify([evidence.sourceItemId]) });
+          return;
+        case "independent_corroboration":
+          await insertOnce(bridge, TABLES.evidence.name, { ...base, source_item_ids: JSON.stringify(evidence.sourceItemIds) });
+          return;
+        case "editor_attestation":
+          await insertOnce(bridge, TABLES.evidence.name, {
+            ...base,
+            editor_login: evidence.editorLogin,
+            method: evidence.method,
+            attested_at: ts(evidence.attestedAt),
+          });
+          return;
+      }
+    },
+    listFor: async (storyId) => (await listForStories([storyId])).get(storyId) ?? [],
+    listForStories,
+  };
+};
 
-const createDecisionStore = (bridge: BridgeClient, clock: Clock): DecisionStore => ({
-  record: async (d) => {
-    const recorded = await insertOnce(
-      bridge,
-      TABLES.decisions.name,
-      {
-        id: uuidv7(clock.now()),
-        story_id: d.storyId,
-        kind: d.kind,
-        editor_login: d.editorLogin,
-        github_comment_id: String(d.githubCommentId),
-        revision_hash: d.revisionHash ?? "",
-        reason: d.reason ?? "",
-        scheduled_for: tsOrEmpty(d.scheduledFor),
-        created_at: ts(d.createdAt),
-      },
-      ["github_comment_id"],
-    );
-    return { recorded };
-  },
-  listFor: async (storyId) =>
-    [...(await bridge.select(TABLES.decisions.name, { story_id: storyId }))].sort(byColumns("created_at", "id")).map(decisionFromRow),
-});
+const createDecisionStore = (bridge: BridgeClient, clock: Clock): DecisionStore => {
+  const listForStories = async (storyIds: readonly StoryId[]): Promise<ReadonlyMap<StoryId, readonly EditorialDecision[]>> => {
+    if (storyIds.length === 0) return new Map();
+    const rows = [...(await bridge.select(TABLES.decisions.name, { story_id: storyIds }))].sort(byColumns("created_at", "id"));
+    return groupByStory(storyIds, rows, decisionFromRow);
+  };
+  return {
+    record: async (d) => {
+      const recorded = await insertOnce(
+        bridge,
+        TABLES.decisions.name,
+        {
+          id: uuidv7(clock.now()),
+          story_id: d.storyId,
+          kind: d.kind,
+          editor_login: d.editorLogin,
+          github_comment_id: String(d.githubCommentId),
+          revision_hash: d.revisionHash ?? "",
+          reason: d.reason ?? "",
+          scheduled_for: tsOrEmpty(d.scheduledFor),
+          created_at: ts(d.createdAt),
+        },
+        ["github_comment_id"],
+      );
+      return { recorded };
+    },
+    listFor: async (storyId) => (await listForStories([storyId])).get(storyId) ?? [],
+    listForStories,
+  };
+};
 
 const createReviewThreadStore = (bridge: BridgeClient, clock: Clock): ReviewThreadStore => {
   const table = TABLES.reviewThreads.name;
+  const issueNumbersFor = async (storyIds: readonly StoryId[]): Promise<ReadonlyMap<StoryId, number>> => {
+    const numbers = new Map<StoryId, number>();
+    if (storyIds.length === 0) return numbers;
+    const rows = await bridge.select(table, { story_id: storyIds }, ["story_id", "issue_number"]);
+    for (const [storyId, [issueNumber]] of groupByStory(storyIds, rows, (r) => intOf(r, "issue_number"))) {
+      if (issueNumber !== undefined) numbers.set(storyId, issueNumber);
+    }
+    return numbers;
+  };
   return {
-    getIssueNumber: async (storyId) => {
-      const [row] = await bridge.select(table, { story_id: storyId }, ["issue_number"]);
-      return row === undefined ? undefined : intOf(row, "issue_number");
-    },
+    getIssueNumber: async (storyId) => (await issueNumbersFor([storyId])).get(storyId),
+    issueNumbersFor,
     getStoryId: async (issueNumber) => {
       const [row] = await bridge.select(table, { issue_number: String(issueNumber) }, ["story_id"]);
       return row === undefined ? undefined : StoryIdSchema.parse(cellOf(row, "story_id"));

@@ -42,4 +42,4 @@ jobs:
           POSTING_WINDOW_IST: ${{ vars.POSTING_WINDOW_IST }}
           PAUSED: ${{ vars.PAUSED }}
           PUBLISH_ON_APPROVAL: ${{ vars.PUBLISH_ON_APPROVAL }}
-        run: pnpm run job:review-command
+        run: node src/jobs/review-command.ts

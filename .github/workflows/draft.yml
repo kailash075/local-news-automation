@@ -4,7 +4,9 @@ name: draft
 # update one review issue per story. Nothing is published here: every post waits for an editor's approval on its issue.
 # Started by collect.yml and by review-command.yml (after /caption or /headline); the schedule is only a safety net,
 # because GitHub sometimes skips scheduled runs, and it works only while automatic collecting is started (collect-switch).
-# Like Coimbatore 360's post.yml, a cheap "check" job runs first and the Chromium job starts only when there is something to draft.
+# Like Coimbatore 360's post.yml, a scheduled run first runs a cheap "check" job and starts the Chromium job only when there
+# is something to draft. A started run skips the check (and its paid minute): collect starts this workflow only when new
+# items arrived, and review-command only after a /caption or /headline, so there is always work.
 on:
   schedule:
     - cron: "37 7-19/4 * * *"
@@ -26,6 +28,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-slim
     timeout-minutes: 5
     outputs:
@@ -44,10 +47,10 @@ jobs:
           STORY_ID: ${{ inputs.story_id }}
           REFRESH_ISSUES: ${{ inputs.refresh_issues == true && 'true' || 'false' }}
           MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
-        run: pnpm run job:draft
+        run: node src/jobs/draft.ts
   draft:
     needs: check
-    if: needs.check.outputs.pending != '' && needs.check.outputs.pending != '0'
+    if: ${{ !cancelled() && (github.event_name != 'schedule' || (needs.check.outputs.pending != '' && needs.check.outputs.pending != '0')) }}
     runs-on: ubuntu-latest # ubuntu-slim once the Phase 0 runner spike shows Chromium works there
     timeout-minutes: 15
     steps:
@@ -69,4 +72,4 @@ jobs:
           REFRESH_ISSUES: ${{ inputs.refresh_issues == true && 'true' || 'false' }}
           MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
           EDITOR_GITHUB_LOGINS: ${{ vars.EDITOR_GITHUB_LOGINS }}
-        run: pnpm run job:draft
+        run: node src/jobs/draft.ts

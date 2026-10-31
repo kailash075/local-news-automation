@@ -54,7 +54,7 @@ Editors can also submit tips by opening an issue from a template; a tip enters t
 
 ## 3. Execution model
 
-All workflows call `pnpm run job:<name>`. The split into collect, draft and publish follows the Coimbatore 360 pattern the owner asked for (2026-10-30); [Workflows](WORKFLOWS.md) explains what was adopted from it and what was deliberately changed, with schedules and costs.
+Each workflow runs `node src/jobs/<name>.ts` (the same command as `pnpm run job:<name>`, without starting pnpm). The split into collect, draft and publish follows the Coimbatore 360 pattern the owner asked for (2026-10-30); [Workflows](WORKFLOWS.md) explains what was adopted from it and what was deliberately changed, with schedules and costs.
 
 | Workflow | Trigger | Runner | What it does | Concurrency group |
 |---|---|---|---|---|
@@ -303,7 +303,7 @@ Algorithm (one publication per run, to respect spacing):
 claim one due publication with a lease (UPDATE ... WHERE lease expired ... RETURNING)
 run gates; on failure record the reason, release the lease, stop
 if no usable container (none, EXPIRED or ERROR):
-    public Cloudinary URL of the render (its name is the image's SHA-256)
+    public Cloudinary URL of the render (named by a SHA-256 of the card's template version and text)
     record attempt "create_container"; call POST /media; store container id
 poll status (about every 60 s, at most 5 min); IN_PROGRESS -> retry in a later run
 if status == PUBLISHED -> reconcile (find the media id) and stop
@@ -423,7 +423,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 ### Controls
 
 - Sheet: not shared with anyone; the Google account has two-factor authentication; the bridge's `@OnlyCurrentDoc` annotation limits it to this one Sheet (`spreadsheets.currentonly`); every request needs the key; the bridge never deletes rows and refuses changes to append-only tabs.
-- Card images are public on Cloudinary at URLs that hold the image's SHA-256, so they cannot be guessed. The URLs appear only in the private review issue and in the request to Meta. Uploads are signed; there is no unsigned upload preset.
+- Card images are public on Cloudinary at URLs named by a SHA-256 of the card's template version and text, so they cannot be guessed without the exact card text. The URLs appear only in the private review issue and in the request to Meta. Uploads are signed; there is no unsigned upload preset.
 - The token is sent in a header where Meta supports it (to be verified in Phase 2), never in a logged URL. A logger redaction list covers `access_token`, `Authorization`, `apikey`, `password` and secret names.
 - `GITHUB_TOKEN` permissions are declared per workflow. There are no `pull_request_target` workflows. Untrusted text reaches scripts only through environment variables.
 - Supply chain: `pnpm install --frozen-lockfile`; build scripts only for allowlisted packages; a minimum release age for new package versions if pnpm 11 supports it (verify in Phase 0); actions pinned to full commit SHAs; Dependabot.
@@ -432,7 +432,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 
 ## 10. Cost controls (technical)
 
-- Workflow schedules sized to the minutes budget ([Operations §9](OPERATIONS.md#9-cost-monitoring-and-budgets)); `ubuntu-slim` where it works; pnpm store and Playwright browser caching; the Chromium step runs only when something needs rendering; job-level `if` filters so non-command comments never start a runner.
+- Workflow schedules sized to the minutes budget ([Operations §9](OPERATIONS.md#9-cost-monitoring-and-budgets)); `ubuntu-slim` where it works; the runner's own Node.js, production dependencies and the Playwright browser restored from the Actions cache; bulk Sheet reads and writes, so a job's Sheet calls do not grow with the number of open stories; the Chromium step runs only when something needs rendering; job-level `if` filters so non-command comments never start a runner.
 - `timeout-minutes` on every job.
 - LLM (Phase 3): drafts only for shortlisted stories; at most 3 LLM revisions per story; a daily item cap; a monthly USD cap computed from `llm_usage`; prompt caching for the stable system prompt; the Batch API (50% cheaper) for anything not urgent; a Console spend limit as the final backstop.
 - Storage: the Sheet's 10 million cells last many years at this volume; a retention job (still to write) can archive old rows. Cloudinary Free plan limits are checked on its pricing page during setup.
@@ -487,7 +487,7 @@ Compiler settings (the starting point for Phase 0):
 }
 ```
 
-`erasableSyntaxOnly` rules out enums, namespaces and parameter properties, which fits "unions and `type` only". It also lets Node run the TypeScript sources directly with built-in type stripping, so jobs need no build step. Phase 0 confirms this works on Node 26 with every dependency; the fallback is a `tsc` build to `dist/`.
+`erasableSyntaxOnly` rules out enums, namespaces and parameter properties, which fits "unions and `type` only". It also lets Node run the TypeScript sources directly with built-in type stripping, so jobs need no build step. This works on Node 24 (the workflows) and Node 22 (local tests) with every dependency; the fallback is a `tsc` build to `dist/`.
 
 Rules:
 

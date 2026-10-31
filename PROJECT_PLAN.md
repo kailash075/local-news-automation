@@ -1,6 +1,6 @@
 # ErodeGlitz: Project Plan
 
-> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 342 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
+> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 357 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
 > Last updated: 2026-10-31. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
 
 ErodeGlitz is a Tamil-first Instagram page for local news from Erode city and Erode district, Tamil Nadu. This repository will hold an automated newsroom pipeline that:
@@ -39,7 +39,7 @@ Related documents:
 
 | Tool | Found | Notes |
 |---|---|---|
-| Node.js | v22.23.2 | The plan targets Node.js 26, which became Active LTS on 2026-10-28 (end of life 2029-04-30). Node 24 is a fallback (maintenance LTS until 2028-04-30). Node 22 reaches end of life on 2027-04-30. |
+| Node.js | v22.23.2 | The workflows use Node.js 24 (maintenance LTS until 2028-04-30), because it is already on the `ubuntu-slim` runner and saves a 10–45 s download in every job (2026-10-31). Node 26 became Active LTS on 2026-10-28; switch `.node-version` to 26 once the runner image ships it. Node 22 reaches end of life on 2027-04-30. |
 | pnpm | 11.20.0 | OK |
 | corepack | 0.34.6 | |
 | TypeScript | no global `tsc` | Will be a project dev dependency |
@@ -117,11 +117,11 @@ These rules hold in every phase. Code, tests and reviews enforce them.
 
 | Area | Proposal | Main reason | Alternatives considered |
 |---|---|---|---|
-| Runtime | Node.js 26 LTS, ES modules | Current Active LTS; supported until April 2029 | Node 24 LTS |
+| Runtime | Node.js 24 LTS, ES modules | Already installed on the `ubuntu-slim` runner, so no job pays for a download; supported until April 2028 | Node 26 LTS once the runner image has it |
 | Language and tooling | TypeScript (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`), domain types declared with `type`, Zod 4, Vitest, ESLint with typescript-eslint strict type-checked rules, pnpm 11 | Requested; catches whole classes of bugs at compile time | — |
 | Scheduler and compute | GitHub Actions on GitHub-hosted runners | Owner requirement; free tier; no server to maintain | Cloud Run Jobs, a small VM (see risk R1) |
 | Storage | Google Sheet in the `erodeglitz@gmail.com` account, reached through an Apps Script web app with a key and a script lock (owner decision, 2026-10-30) | Same as Coimbatore 360; free; the owner can read everything in the Sheet | Supabase Postgres (the earlier plan); Neon Postgres |
-| Card images | Cloudinary Free, signed uploads, public URLs named by the image's SHA-256 | Instagram must fetch images from a public URL; same as Coimbatore 360 | Supabase Storage with signed URLs (the earlier plan); Cloudflare R2 |
+| Card images | Cloudinary Free, signed uploads, public URLs named by a SHA-256 of the card's template version and text | Instagram must fetch images from a public URL; same as Coimbatore 360 | Supabase Storage with signed URLs (the earlier plan); Cloudflare R2 |
 | Data access | Typed stores over the bridge, every row parsed with Zod; tests run the real bridge code on a fake Sheet | No database driver; no Docker needed in tests | — |
 | Instagram integration | Instagram API with Instagram Login (`graph.instagram.com`), Standard Access, own account only | Fully documented; no Facebook Page needed; Meta's table says App Review is not required for an app used only for a business you own | Unified Login (Meta recommends it for new integrations, but its token setup was not fully documented when checked); Facebook Login for Business |
 | Review desk | GitHub Issues in this private repository, with slash commands in comments | Free; works from the GitHub mobile app; full audit trail; no new account | Telegram bot (Phase 4 option) |

@@ -219,6 +219,98 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
     });
   });
 
+  describe("many items and stories in one request", () => {
+    it("insert many items: each (source, url) once, in the order given", async () => {
+      expect((await s.sourceItems.insertIfNew(newSourceItem("a", h.clock.now()))).inserted).toBe(true);
+      h.clock.advance(1000);
+      const stored = await s.sourceItems.insertManyIfNew([
+        newSourceItem("a", h.clock.now()),
+        newSourceItem("c", h.clock.now()),
+        newSourceItem("b", h.clock.now()),
+        newSourceItem("c", h.clock.now(), { title: "again" }),
+      ]);
+      expect(stored.map((i) => i.title)).toEqual(["ஈரோடு செய்தி c", "ஈரோடு செய்தி b"]);
+      expect(await s.sourceItems.isKnown(TEST_SOURCE_ID, newSourceItem("b", h.clock.now()).urlHash)).toBe(true);
+      expect(await s.sourceItems.insertManyIfNew([])).toEqual([]);
+      const unassigned = await s.sourceItems.listUnassigned(10);
+      expect(unassigned.map((i) => i.title)).toEqual(["ஈரோடு செய்தி a", "ஈரோடு செய்தி c", "ஈரோடு செய்தி b"]);
+    });
+
+    it("insert many stories and attach many items, then read the items per story", async () => {
+      const [a, b, c] = await s.sourceItems.insertManyIfNew(["a", "b", "c"].map((seed) => newSourceItem(seed, h.clock.now())));
+      if (a === undefined || b === undefined || c === undefined) throw new Error("expected inserts");
+      const one = makeStory(h.clock.now());
+      const two = makeStory(h.clock.now());
+      const empty = makeStory(h.clock.now());
+      await s.stories.insertMany([one, two, empty]);
+      await s.stories.insertMany([]);
+      expect(await s.stories.get(two.id)).toEqual(two);
+
+      await s.sourceItems.attachToStories([
+        { itemId: a.id, storyId: one.id, relation: "primary" },
+        { itemId: b.id, storyId: one.id, relation: "corroborating" },
+        { itemId: c.id, storyId: two.id, relation: "primary" },
+        { itemId: a.id, storyId: two.id, relation: "corroborating" },
+      ]);
+      await s.sourceItems.attachToStories([]);
+      expect(await s.sourceItems.listUnassigned(10)).toEqual([]);
+      const byStory = await s.sourceItems.listForStories([one.id, two.id, empty.id]);
+      expect(byStory.get(one.id)?.map((i) => i.id)).toEqual([a.id, b.id]);
+      expect(byStory.get(two.id)?.map((i) => i.id)).toEqual([a.id, c.id]);
+      expect(byStory.has(empty.id)).toBe(false);
+      expect(await s.sourceItems.listForStory(two.id)).toEqual(byStory.get(two.id));
+      expect((await s.sourceItems.listForStories([])).size).toBe(0);
+    });
+
+    it("read the latest draft, decisions, evidence and review issue of many stories", async () => {
+      const one = makeStory(h.clock.now());
+      const two = makeStory(h.clock.now());
+      const none = makeStory(h.clock.now());
+      await s.stories.insertMany([one, two, none]);
+      const ids = [one.id, two.id, none.id];
+
+      await s.drafts.insert(makeDraft(one.id, h.clock.now(), 1));
+      const latest = makeDraft(one.id, h.clock.now(), 2);
+      const onlyDraft = makeDraft(two.id, h.clock.now(), 1);
+      await s.drafts.insert(latest);
+      await s.drafts.insert(onlyDraft);
+      const drafts = await s.drafts.latestForStories(ids);
+      expect(drafts.get(one.id)).toEqual(latest);
+      expect(drafts.get(two.id)).toEqual(onlyDraft);
+      expect(drafts.has(none.id)).toBe(false);
+
+      const caption = (storyId: typeof one.id, githubCommentId: number, minutes: number) => ({
+        storyId,
+        kind: "caption" as const,
+        editorLogin: editor,
+        githubCommentId,
+        reason: "ஈரோட்டில் நாளை மின்தடை",
+        createdAt: iso(new Date(h.clock.now().getTime() + minutes * MINUTE)),
+      });
+      await s.decisions.record(caption(one.id, 2, 2));
+      await s.decisions.record(caption(one.id, 1, 1));
+      await s.decisions.record(caption(two.id, 3, 1));
+      const decisions = await s.decisions.listForStories(ids);
+      expect(decisions.get(one.id)?.map((d) => d.githubCommentId)).toEqual([1, 2]);
+      expect(decisions.get(two.id)).toEqual([caption(two.id, 3, 1)]);
+      expect(decisions.has(none.id)).toBe(false);
+
+      const attestation = { kind: "editor_attestation" as const, editorLogin: editor, method: "Called the Erode EB office", attestedAt: iso(h.clock.now()) };
+      await s.evidence.add(two.id, attestation);
+      const evidence = await s.evidence.listForStories(ids);
+      expect(evidence.get(two.id)).toEqual([attestation]);
+      expect(evidence.has(one.id)).toBe(false);
+
+      await s.reviewThreads.save(one.id, 7, 2);
+      await s.reviewThreads.save(two.id, 9, 1);
+      const issues = await s.reviewThreads.issueNumbersFor(ids);
+      expect(issues.get(one.id)).toBe(7);
+      expect(issues.get(two.id)).toBe(9);
+      expect(issues.has(none.id)).toBe(false);
+      expect((await s.reviewThreads.issueNumbersFor([])).size).toBe(0);
+    });
+  });
+
   describe("publications", () => {
     const setup = async (offsetMinutes = 0): Promise<Publication> => {
       const story = makeStory(h.clock.now());

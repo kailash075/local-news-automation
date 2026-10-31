@@ -27,4 +27,4 @@ jobs:
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           PAUSED: ${{ vars.PAUSED }}
           IG_GRAPH_VERSION: ${{ vars.IG_GRAPH_VERSION }}
-        run: pnpm run job:status
+        run: node src/jobs/status.ts

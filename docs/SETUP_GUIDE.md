@@ -152,7 +152,7 @@ Instagram downloads each image from a public URL. Coimbatore 360 uses Cloudinary
    - the **API key** into the secret `CLOUDINARY_API_KEY`;
    - the **API secret** into the secret `CLOUDINARY_API_SECRET`.
 3. Do not create an unsigned upload preset. The jobs sign every upload with the API secret, so nobody else can upload to the account.
-4. Every rendered card, including cards of stories that are later rejected, is reachable by anyone who has its exact URL. The URL contains the image's SHA-256, so it cannot be guessed, and it appears only in the private review issue and in the request to Instagram.
+4. Every rendered card, including cards of stories that are later rejected, is reachable by anyone who has its exact URL. The URL contains a SHA-256 of the card's template version and text, so it cannot be guessed without the exact card text, and it appears only in the private review issue and in the request to Instagram.
 
 ## 6. Meta and Instagram (Phase 2) [Approval]
 

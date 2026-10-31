@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { NewSourceItem, SourceFetchState, SourceItemStore, SourceStateStore } from "../domain/ports.ts";
+import type { NewSourceItem, SourceFetchState, SourceStateStore } from "../domain/ports.ts";
 import { IsoDateTimeSchema, SourceItemIdSchema, SourceSchema, type Source, type SourceId, type SourceItem } from "../domain/types.ts";
 import { DISABLE_AFTER_FAILURES, MAX_ARTICLE_FETCHES_PER_RUN, collectSource, type CollectDeps, type RobotsCache } from "./collect.ts";
 import type { FetchLike } from "./http.ts";
@@ -39,6 +39,8 @@ const FEED = `<?xml version="1.0"?><rss version="2.0"><channel>
 class MemoryStores {
   readonly states = new Map<SourceId, SourceFetchState>();
   readonly items: SourceItem[] = [];
+  /** Size of each item write, to check that a page is stored in one request. */
+  readonly writes: number[] = [];
 
   readonly sourceState: SourceStateStore = {
     getFetchState: (sourceId) => Promise.resolve(this.states.get(sourceId) ?? { sourceId, consecutiveFailures: 0 }),
@@ -48,17 +50,19 @@ class MemoryStores {
     },
   };
 
-  readonly sourceItems: SourceItemStore = {
-    insertIfNew: (item: NewSourceItem) => {
-      if (this.items.some((i) => i.sourceId === item.sourceId && i.urlHash === item.urlHash)) return Promise.resolve({ inserted: false });
-      const stored: SourceItem = { ...item, id: SourceItemIdSchema.parse(randomUUID()) };
-      this.items.push(stored);
-      return Promise.resolve({ inserted: true, item: stored });
+  readonly sourceItems: CollectDeps["sourceItems"] = {
+    insertManyIfNew: (batch: readonly NewSourceItem[]) => {
+      this.writes.push(batch.length);
+      const stored: SourceItem[] = [];
+      for (const item of batch) {
+        if (this.items.some((i) => i.sourceId === item.sourceId && i.urlHash === item.urlHash)) continue;
+        const next: SourceItem = { ...item, id: SourceItemIdSchema.parse(randomUUID()) };
+        this.items.push(next);
+        stored.push(next);
+      }
+      return Promise.resolve(stored);
     },
     isKnown: (sourceId, urlHash) => Promise.resolve(this.items.some((i) => i.sourceId === sourceId && i.urlHash === urlHash)),
-    listUnassigned: () => Promise.resolve(this.items),
-    attachToStory: () => Promise.resolve(),
-    listForStory: () => Promise.resolve([]),
   };
 }
 
@@ -221,6 +225,31 @@ describe("collectSource", () => {
       ["கொடுமுடியில் விழா", "2026-10-29T20:00:00.000Z"],
     ]);
     expect(pauses).toHaveLength(1); // between the two article requests, not before the first
+  });
+
+  it("stores a whole page in one write", async () => {
+    const stores = new MemoryStores();
+    const { fetch } = router({
+      "https://example.com/robots.txt": () => new Response(""),
+      "https://example.com/district/erode": () => new Response(LISTING),
+      "https://example.com/news/7": article("2026-10-30T09:00:00+05:30"),
+      "https://example.com/news/8": article("2026-10-30T09:30:00+05:30"),
+    });
+    await collectSource(listing, deps(stores, fetch, { pause: () => Promise.resolve() }));
+    expect(stores.writes).toEqual([2]);
+    expect(stores.items.map((i) => i.canonicalUrl)).toEqual(["https://example.com/news/7", "https://example.com/news/8"]);
+  });
+
+  it("makes no write when nothing on the page is new", async () => {
+    const stores = new MemoryStores();
+    const { fetch } = router({
+      "https://example.com/robots.txt": () => new Response(""),
+      "https://example.com/district/erode": () => new Response(LISTING),
+      "https://example.com/news/7": () => new Response("<p>no date here</p>"),
+      "https://example.com/news/8": () => new Response("<p>no date here</p>"),
+    });
+    await collectSource(listing, deps(stores, fetch, { pause: () => Promise.resolve() }));
+    expect(stores.writes).toEqual([]);
   });
 
   it("regression: an article without a readable date is not stored, so old news cannot pass as new", async () => {

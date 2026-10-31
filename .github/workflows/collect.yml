@@ -39,7 +39,7 @@ jobs:
           SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || 'false' }}
           MAX_STORY_AGE_HOURS: ${{ vars.MAX_STORY_AGE_HOURS }}
-        run: pnpm run job:collect
+        run: node src/jobs/collect.ts
       - name: Start draft when something new arrived
         if: steps.collect.outputs.new_items != '' && steps.collect.outputs.new_items != '0'
         env:

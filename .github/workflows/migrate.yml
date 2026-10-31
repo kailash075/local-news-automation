@@ -22,4 +22,4 @@ jobs:
         env:
           SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
           SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
-        run: pnpm run job:migrate
+        run: node src/jobs/migrate.ts

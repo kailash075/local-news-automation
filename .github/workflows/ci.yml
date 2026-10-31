@@ -21,6 +21,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           browser: "true"
+          dev: "true"
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm run test

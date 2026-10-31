@@ -18,6 +18,8 @@ import type {
 /**
  * Persistence and I/O boundaries. Domain and job code depend on these types only.
  * `src/sheet` implements the stores on the Google Sheet (through the Apps Script bridge); `src/storage` holds the images.
+ * Every Sheet request costs one to two seconds of Actions time, so the `...Many` and `...ForStories` methods do the work
+ * of their one-story versions in one request: a job's cost must not grow with the number of open stories.
  */
 
 export type Clock = { now: () => Date };
@@ -61,20 +63,28 @@ export type NewSourceItem = Omit<SourceItem, "id">;
 
 export type StoryRelation = "primary" | "corroborating" | "contradicting";
 
+export type StoryAttachment = { itemId: SourceItemId; storyId: StoryId; relation: StoryRelation };
+
 export type SourceItemStore = {
   /** Unique on (sourceId, urlHash). Returns the stored item only when it was new. */
   insertIfNew: (item: NewSourceItem) => Promise<{ inserted: true; item: SourceItem } | { inserted: false }>;
+  /** `insertIfNew` for many items in one write. Returns the items that were new, in the order given. */
+  insertManyIfNew: (items: readonly NewSourceItem[]) => Promise<readonly SourceItem[]>;
   /** Whether (sourceId, urlHash) is already stored, so a collector can skip extra work for known links. */
   isKnown: (sourceId: NewSourceItem["sourceId"], urlHash: NewSourceItem["urlHash"]) => Promise<boolean>;
   listUnassigned: (limit: number) => Promise<readonly SourceItem[]>;
   attachToStory: (itemId: SourceItemId, storyId: StoryId, relation: StoryRelation) => Promise<void>;
+  attachToStories: (attachments: readonly StoryAttachment[]) => Promise<void>;
   listForStory: (storyId: StoryId) => Promise<readonly SourceItem[]>;
+  /** Stories without items are absent from the map. */
+  listForStories: (storyIds: readonly StoryId[]) => Promise<ReadonlyMap<StoryId, readonly SourceItem[]>>;
 };
 
 // ---------------------------------------------------------------- stories
 
 export type StoryStore = {
   insert: (story: Story) => Promise<void>;
+  insertMany: (stories: readonly Story[]) => Promise<void>;
   get: (id: StoryId) => Promise<Story | undefined>;
   /** Writes only when the stored version equals `expectedVersion`; the stored version becomes `expectedVersion + 1`. */
   update: (story: Story, expectedVersion: number) => Promise<Result<Story, "version_conflict" | "not_found">>;
@@ -87,21 +97,27 @@ export type DraftStore = {
   insert: (draft: DraftRevision) => Promise<void>;
   get: (id: DraftId) => Promise<DraftRevision | undefined>;
   latestFor: (storyId: StoryId) => Promise<DraftRevision | undefined>;
+  /** Stories without a draft are absent from the map. */
+  latestForStories: (storyIds: readonly StoryId[]) => Promise<ReadonlyMap<StoryId, DraftRevision>>;
 };
 
 export type EvidenceStore = {
   add: (storyId: StoryId, evidence: VerificationEvidence) => Promise<void>;
   listFor: (storyId: StoryId) => Promise<readonly VerificationEvidence[]>;
+  listForStories: (storyIds: readonly StoryId[]) => Promise<ReadonlyMap<StoryId, readonly VerificationEvidence[]>>;
 };
 
 export type DecisionStore = {
   /** Unique on githubCommentId: a redelivered comment is not recorded twice. */
   record: (decision: EditorialDecision) => Promise<{ recorded: boolean }>;
   listFor: (storyId: StoryId) => Promise<readonly EditorialDecision[]>;
+  listForStories: (storyIds: readonly StoryId[]) => Promise<ReadonlyMap<StoryId, readonly EditorialDecision[]>>;
 };
 
 export type ReviewThreadStore = {
   getIssueNumber: (storyId: StoryId) => Promise<number | undefined>;
+  /** Stories without a review issue are absent from the map. */
+  issueNumbersFor: (storyIds: readonly StoryId[]) => Promise<ReadonlyMap<StoryId, number>>;
   getStoryId: (issueNumber: number) => Promise<StoryId | undefined>;
   save: (storyId: StoryId, issueNumber: number, lastSyncedRevision: number) => Promise<void>;
 };
@@ -176,8 +192,9 @@ export type TokenStore = {
 };
 
 /**
- * Rendered cards (Cloudinary). Instagram fetches the image from `publicUrl`; the URL is public but holds the image's
- * SHA-256, so it cannot be guessed, and it only appears in the private review issue and in the publish request.
+ * Rendered cards (Cloudinary). Instagram fetches the image from `publicUrl`; the URL is public but holds a SHA-256 of the
+ * card's template version and text, so it cannot be guessed without that text, and it only appears in the private review
+ * issue and in the publish request.
  */
 export type ObjectStore = {
   put: (key: string, bytes: Uint8Array, contentType: string) => Promise<void>;

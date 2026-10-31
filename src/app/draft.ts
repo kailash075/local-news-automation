@@ -93,20 +93,28 @@ const describeRenderError = (e: RenderError): string => {
 
 /**
  * Work for the Chromium job: stories that need a new revision or still have no review issue. With `refreshIssues`,
- * every active story counts, because its issue is rewritten.
+ * every active story counts, because its issue is rewritten. A fixed number of Sheet reads, however many stories are open.
  */
 export const pendingDraftWork = async (deps: Pick<DraftDeps, "stores">, onlyStoryId?: string, refreshIssues = false): Promise<number> => {
-  const unassigned = (await deps.stores.sourceItems.listUnassigned(1)).length;
-  let stories = 0;
-  for (const story of await deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100)) {
-    if (onlyStoryId !== undefined && story.id !== onlyStoryId) continue;
-    const request = captionRequest(await deps.stores.decisions.listFor(story.id));
-    const draft = await deps.stores.drafts.latestFor(story.id);
+  const [unassigned, active] = await Promise.all([
+    deps.stores.sourceItems.listUnassigned(1),
+    deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100),
+  ]);
+  const stories = active.filter((s) => onlyStoryId === undefined || s.id === onlyStoryId);
+  if (onlyStoryId !== undefined || refreshIssues) return unassigned.length + stories.length;
+  const ids = stories.map((s) => s.id);
+  const [decisions, drafts, issues] = await Promise.all([
+    deps.stores.decisions.listForStories(ids),
+    deps.stores.drafts.latestForStories(ids),
+    deps.stores.reviewThreads.issueNumbersFor(ids),
+  ]);
+  const waiting = stories.filter((story) => {
+    const request = captionRequest(decisions.get(story.id) ?? []);
+    const draft = drafts.get(story.id);
     const needsRevision = request !== undefined && (draft === undefined || request.requestedAt > draft.createdAt);
-    const needsIssue = (await deps.stores.reviewThreads.getIssueNumber(story.id)) === undefined;
-    if (needsRevision || needsIssue || onlyStoryId !== undefined || refreshIssues) stories += 1;
-  }
-  return unassigned + stories;
+    return needsRevision || !issues.has(story.id);
+  });
+  return unassigned.length + waiting.length;
 };
 
 const buildRevision = async (
@@ -189,19 +197,28 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIs
   const stories = (await deps.stores.stories.listByStatus(ACTIVE_STATUSES, 100)).filter(
     (s) => onlyStoryId === undefined || s.id === onlyStoryId,
   );
+  // Everything the loop needs, read once for all stories: the Sheet cost stays flat as stories pile up.
+  const ids = stories.map((s) => s.id);
+  const [issueNumbers, decisionsByStory, itemsByStory, drafts, evidenceByStory] = await Promise.all([
+    deps.stores.reviewThreads.issueNumbersFor(ids),
+    deps.stores.decisions.listForStories(ids),
+    deps.stores.sourceItems.listForStories(ids),
+    deps.stores.drafts.latestForStories(ids),
+    deps.stores.evidence.listForStories(ids),
+  ]);
 
   // Highest priority first (power cuts lead), then the newest.
   const order = (a: Story, b: Story): number => b.priority - a.priority || Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt);
   for (const initial of stories.sort(order)) {
     let story = initial;
-    let issueNumber = await deps.stores.reviewThreads.getIssueNumber(story.id);
+    let issueNumber = issueNumbers.get(story.id);
     if (issueNumber === undefined && onlyStoryId === undefined && report.issuesCreated >= MAX_NEW_ISSUES_PER_RUN) {
       report.deferred += 1;
       continue;
     }
-    const decisions = await deps.stores.decisions.listFor(story.id);
-    const items = await deps.stores.sourceItems.listForStory(story.id);
-    let draft = await deps.stores.drafts.latestFor(story.id);
+    const decisions = decisionsByStory.get(story.id) ?? [];
+    const items = itemsByStory.get(story.id) ?? [];
+    let draft = drafts.get(story.id);
     let changed = issueNumber === undefined || onlyStoryId !== undefined || refreshIssues;
 
     const request = captionRequest(decisions);
@@ -223,7 +240,7 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIs
     }
     if (!changed) continue;
 
-    const evidence = await deps.stores.evidence.listFor(story.id);
+    const evidence = evidenceByStory.get(story.id) ?? [];
     const checks: string[] = [];
     if (draft === undefined) {
       checks.push("No caption yet. Reply with `/caption`: the first line is the headline, each following line is one fact.");

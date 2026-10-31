@@ -35,7 +35,7 @@ export type RobotsCache = Map<string, RobotsEntry>;
 export type CollectDeps = {
   clock: Clock;
   sourceState: SourceStateStore;
-  sourceItems: SourceItemStore;
+  sourceItems: Pick<SourceItemStore, "isKnown" | "insertManyIfNew">;
   contactUrl: string;
   fetch?: FetchLike;
   robotsCache?: RobotsCache;
@@ -178,8 +178,9 @@ export const toNewSourceItem = (source: Source, candidate: Candidate, baseUrl: s
 };
 
 /**
- * One collection pass for one source: terms gate, due check, robots.txt, conditional GET, parse, store new items,
- * save fetch state. Errors are returned, never thrown, so one bad source cannot stop the others.
+ * One collection pass for one source: terms gate, due check, robots.txt, conditional GET, parse, store new items (one
+ * Sheet write for the whole page), save fetch state. Errors are returned, never thrown, so one bad source cannot stop
+ * the others.
  */
 export const collectSource = async (source: Source, deps: CollectDeps): Promise<CollectOutcome> => {
   const now = deps.clock.now();
@@ -232,7 +233,7 @@ export const collectSource = async (source: Source, deps: CollectDeps): Promise<
   if (!candidates.ok) return fail(`${candidates.error.kind}: ${candidates.error.message}`);
 
   const limit = deps.maxItemsPerRun ?? DEFAULT_MAX_ITEMS_PER_RUN;
-  const inserted: SourceItem[] = [];
+  const fresh: NewSourceItem[] = [];
   let invalid = 0;
   let undated = 0;
   let articleFetches = 0;
@@ -257,9 +258,9 @@ export const collectSource = async (source: Source, deps: CollectDeps): Promise<
       }
       item = { ...item, publishedAt: IsoDateTimeSchema.parse(publishedAt.toISOString()) };
     }
-    const r = await deps.sourceItems.insertIfNew(item);
-    if (r.inserted) inserted.push(r.item);
+    fresh.push(item);
   }
+  const inserted: readonly SourceItem[] = fresh.length === 0 ? [] : await deps.sourceItems.insertManyIfNew(fresh);
 
   const next: SourceFetchState = {
     sourceId: source.id,

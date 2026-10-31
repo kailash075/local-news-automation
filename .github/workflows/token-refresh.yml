@@ -28,4 +28,4 @@ jobs:
           SHEET_BRIDGE_KEY: ${{ secrets.SHEET_BRIDGE_KEY }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           IG_GRAPH_VERSION: ${{ vars.IG_GRAPH_VERSION }}
-        run: pnpm run job:token-refresh
+        run: node src/jobs/token-refresh.ts

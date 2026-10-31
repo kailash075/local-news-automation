@@ -6,6 +6,7 @@ import type {
   NewSourceItem,
   PublishAttempt,
   SourceFetchState,
+  StoryAttachment,
   StoryRelation,
   Stores,
   SwitchKey,
@@ -63,6 +64,43 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
   let token: InstagramCredentials | undefined;
   let linkOrder = 0;
 
+  /** Map of the stories that have entries, as the Sheet stores answer the `...ForStories` reads. */
+  const perStory = <T>(storyIds: readonly StoryId[], list: (storyId: StoryId) => readonly T[]): ReadonlyMap<StoryId, readonly T[]> =>
+    new Map(storyIds.map((id) => [id, list(id)] as const).filter(([, entries]) => entries.length > 0));
+
+  const insertManyIfNew = (batch: readonly NewSourceItem[]): Promise<readonly SourceItem[]> => {
+    const start = clock.now().getTime();
+    const stored: SourceItem[] = [];
+    for (const item of batch) {
+      if ([...items.values()].some((i) => i.sourceId === item.sourceId && i.urlHash === item.urlHash)) continue;
+      const next = SourceItemSchema.parse({ ...item, id: SourceItemIdSchema.parse(uuidv7(new Date(start + stored.length))) });
+      items.set(next.id, next);
+      stored.push(clone(next));
+    }
+    return Promise.resolve(stored);
+  };
+
+  const attachToStories = (attachments: readonly StoryAttachment[]): Promise<void> => {
+    for (const { itemId, storyId, relation } of attachments) {
+      const key = `${storyId}:${itemId}`;
+      const existing = links.get(key);
+      links.set(key, { storyId, itemId, relation, order: existing?.order ?? linkOrder++ });
+      if (!itemStory.has(itemId)) itemStory.set(itemId, storyId);
+    }
+    return Promise.resolve();
+  };
+
+  const latestDraft = (storyId: StoryId): DraftRevision | undefined =>
+    [...draftMap.values()].filter((d) => d.storyId === storyId).sort((a, b) => b.revision - a.revision)[0];
+
+  const decisionsFor = (storyId: StoryId): EditorialDecision[] =>
+    decisions
+      .filter((d) => d.storyId === storyId)
+      .sort((a, b) => time(a.createdAt) - time(b.createdAt))
+      .map(clone);
+
+  const evidenceFor = (storyId: StoryId): VerificationEvidence[] => evidence.filter((e) => e.storyId === storyId).map((e) => clone(e.evidence));
+
   const itemsForStory = (storyId: StoryId): SourceItem[] =>
     [...links.values()]
       .filter((l) => l.storyId === storyId)
@@ -100,13 +138,11 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
     },
 
     sourceItems: {
-      insertIfNew: (item: NewSourceItem) => {
-        const duplicate = [...items.values()].some((i) => i.sourceId === item.sourceId && i.urlHash === item.urlHash);
-        if (duplicate) return Promise.resolve({ inserted: false } as const);
-        const stored = SourceItemSchema.parse({ ...item, id: SourceItemIdSchema.parse(uuidv7(clock.now())) });
-        items.set(stored.id, stored);
-        return Promise.resolve({ inserted: true, item: clone(stored) } as const);
+      insertIfNew: async (item: NewSourceItem) => {
+        const [stored] = await insertManyIfNew([item]);
+        return stored === undefined ? ({ inserted: false } as const) : ({ inserted: true, item: stored } as const);
       },
+      insertManyIfNew,
       isKnown: (sourceId, urlHash) => Promise.resolve([...items.values()].some((i) => i.sourceId === sourceId && i.urlHash === urlHash)),
       listUnassigned: (limit) =>
         Promise.resolve(
@@ -116,20 +152,22 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
             .slice(0, limit)
             .map(clone),
         ),
-      attachToStory: (itemId, storyId, relation) => {
-        const key = `${storyId}:${itemId}`;
-        const existing = links.get(key);
-        links.set(key, { storyId, itemId, relation, order: existing?.order ?? linkOrder++ });
-        if (!itemStory.has(itemId)) itemStory.set(itemId, storyId);
-        return Promise.resolve();
-      },
+      attachToStory: (itemId, storyId, relation) => attachToStories([{ itemId, storyId, relation }]),
+      attachToStories,
       listForStory: (storyId) => Promise.resolve(itemsForStory(storyId)),
+      listForStories: (storyIds) => Promise.resolve(perStory(storyIds, itemsForStory)),
     },
 
     stories: {
       insert: (story) => {
         if (storyMap.has(story.id)) return Promise.reject(new Error(`duplicate story id ${story.id}`));
         storyMap.set(story.id, clone(story));
+        return Promise.resolve();
+      },
+      insertMany: (stories) => {
+        const clash = stories.find((story, i) => storyMap.has(story.id) || stories.findIndex((other) => other.id === story.id) !== i);
+        if (clash !== undefined) return Promise.reject(new Error(`duplicate story id ${clash.id}`));
+        for (const story of stories) storyMap.set(story.id, clone(story));
         return Promise.resolve();
       },
       get: (id) => Promise.resolve(storyMap.has(id) ? clone(storyMap.get(id)) : undefined),
@@ -169,10 +207,16 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
       },
       get: (id) => Promise.resolve(draftMap.has(id) ? clone(draftMap.get(id)) : undefined),
       latestFor: (storyId) => {
-        const latest = [...draftMap.values()]
-          .filter((d) => d.storyId === storyId)
-          .sort((a, b) => b.revision - a.revision)[0];
+        const latest = latestDraft(storyId);
         return Promise.resolve(latest === undefined ? undefined : clone(latest));
+      },
+      latestForStories: (storyIds) => {
+        const latest = new Map<StoryId, DraftRevision>();
+        for (const id of storyIds) {
+          const draft = latestDraft(id);
+          if (draft !== undefined) latest.set(id, clone(draft));
+        }
+        return Promise.resolve(latest);
       },
     },
 
@@ -181,7 +225,8 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
         evidence.push({ storyId, evidence: VerificationEvidenceSchema.parse(e) });
         return Promise.resolve();
       },
-      listFor: (storyId) => Promise.resolve(evidence.filter((e) => e.storyId === storyId).map((e) => clone(e.evidence))),
+      listFor: (storyId) => Promise.resolve(evidenceFor(storyId)),
+      listForStories: (storyIds) => Promise.resolve(perStory(storyIds, evidenceFor)),
     },
 
     decisions: {
@@ -190,17 +235,20 @@ export const createMemoryStores = (clock: Clock): MemoryStores => {
         decisions.push(clone(d));
         return Promise.resolve({ recorded: true });
       },
-      listFor: (storyId) =>
-        Promise.resolve(
-          decisions
-            .filter((d) => d.storyId === storyId)
-            .sort((a, b) => time(a.createdAt) - time(b.createdAt))
-            .map(clone),
-        ),
+      listFor: (storyId) => Promise.resolve(decisionsFor(storyId)),
+      listForStories: (storyIds) => Promise.resolve(perStory(storyIds, decisionsFor)),
     },
 
     reviewThreads: {
       getIssueNumber: (storyId) => Promise.resolve(threads.get(storyId)?.issueNumber),
+      issueNumbersFor: (storyIds) => {
+        const numbers = new Map<StoryId, number>();
+        for (const id of storyIds) {
+          const thread = threads.get(id);
+          if (thread !== undefined) numbers.set(id, thread.issueNumber);
+        }
+        return Promise.resolve(numbers);
+      },
       getStoryId: (issueNumber) => {
         for (const [storyId, t] of threads) {
           if (t.issueNumber === issueNumber) return Promise.resolve(storyId);

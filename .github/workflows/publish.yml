@@ -60,4 +60,4 @@ jobs:
           MIN_MINUTES_BETWEEN_POSTS: ${{ vars.MIN_MINUTES_BETWEEN_POSTS }}
           APPROVAL_TTL_HOURS: ${{ vars.APPROVAL_TTL_HOURS }}
           IG_GRAPH_VERSION: ${{ vars.IG_GRAPH_VERSION }}
-        run: pnpm run job:publish
+        run: node src/jobs/publish.ts
