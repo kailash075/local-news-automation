@@ -187,7 +187,7 @@ Archive old rows of `job_runs`, `errors` and `publish_attempts` into a copy of t
 ### 6.J Actions not running, or budget used up
 
 - Check the repository's Actions tab and GitHub's status page.
-- GitHub disables scheduled workflows in **public** repositories after 60 days without repository activity. This repository is private, but if it ever becomes public, re-enable them in the Actions tab.
+- GitHub disables scheduled workflows in **public** repositories after 60 days without repository activity, and this repository is public (since 2026-10-31). If it happens, re-enable each workflow in the Actions tab.
 - If the included compute is used up, runs are blocked until the next billing cycle unless a payment method and budget allow more, which costs money and needs approval. Reduce frequency (for example, `pipeline.yml` every 2 hours) and move jobs to `ubuntu-slim`.
 - If GitHub restricts the account or repository over its Actions terms (risk R1), see §13.
 
@@ -225,7 +225,9 @@ Captions fall back to manual automatically. Nothing else is affected. Raising th
 
 ## 9. Cost monitoring and budgets
 
-### GitHub Actions (private repository)
+### GitHub Actions
+
+The repository is public (since 2026-10-31), so standard runners, `ubuntu-slim` and `ubuntu-latest` included, are free and unlimited ([GitHub docs](https://docs.github.com/en/billing/concepts/product-billing/github-actions)). The rest of this section applies only if it goes private again.
 
 GitHub Free includes **USD 12 per month** of Actions compute for private repositories. Linux 2-core runners cost USD 0.006 per minute and `ubuntu-slim` (1 vCPU) costs USD 0.002 per minute. Without a payment method, usage is **blocked** when the allowance runs out; GitHub emails at 90% and 100%.
 

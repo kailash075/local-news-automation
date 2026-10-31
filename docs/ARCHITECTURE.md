@@ -280,7 +280,7 @@ Authorisation and safety:
 - Comment bodies are untrusted input. Workflows pass them to the TypeScript parser through an environment variable and never interpolate `${{ github.event.comment.body }}` into a shell script, which would allow script injection.
 - Each processed comment ID is stored with a unique constraint, so a redelivered event cannot create a second decision.
 
-The repository must stay **private**, because issues contain unpublished and possibly unverified material.
+The repository is **public** (owner decision, 2026-10-31), so standard Actions runners are free, and the issues are public too. Therefore no newspaper text goes into issue titles, issue bodies or run summaries: an issue names each source and links to it, and the editor reads the story there (`test/public-safety.test.ts`). Everything typed into an issue is public, including `/caption` drafts of stories that are later rejected.
 
 ### 5.10 Publishing
 
@@ -427,7 +427,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 ### Controls
 
 - Sheet: not shared with anyone; the Google account has two-factor authentication; the bridge's `@OnlyCurrentDoc` annotation limits it to this one Sheet (`spreadsheets.currentonly`); every request needs the key; the bridge never deletes rows and refuses changes to append-only tabs.
-- Card images are public on Cloudinary at URLs named by a SHA-256 of the card's template version and text, so they cannot be guessed without the exact card text. The URLs appear only in the private review issue and in the request to Meta. Uploads are signed; there is no unsigned upload preset.
+- Card images are public on Cloudinary at URLs named by a SHA-256 of the card's template version and text, so they cannot be guessed without the exact card text. The URLs appear in the review issue, which is public, and in the request to Meta, so anyone reading an issue can see the card of a story that is not approved yet. Uploads are signed; there is no unsigned upload preset.
 - The token is sent in a header where Meta supports it (to be verified in Phase 2), never in a logged URL. A logger redaction list covers `access_token`, `Authorization`, `apikey`, `password` and secret names.
 - `GITHUB_TOKEN` permissions are declared per workflow. There are no `pull_request_target` workflows. Untrusted text reaches scripts only through environment variables.
 - Supply chain: `pnpm install --frozen-lockfile`; build scripts only for allowlisted packages; a minimum release age for new package versions if pnpm 11 supports it (verify in Phase 0); actions pinned to full commit SHAs; Dependabot.

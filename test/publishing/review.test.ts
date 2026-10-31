@@ -212,12 +212,11 @@ describe("issue body", () => {
     const other = makeStory();
     const body = renderIssueBody({
       story,
-      draft: makeDraft(story, { captionTa: `${storyMarker(other.id)} @someone` }),
+      draft: makeDraft(story, { captionTa: `${storyMarker(other.id)} @someone`, headlineTa: "@headline <b>" }),
       verificationLevel: "V1_CORROBORATED",
       sources: [
         {
           name: "<!-- erodeglitz:story=x --> @mention",
-          title: "@headline <b>",
           url: "https://example.org/a b",
           trustTier: "T2_established_publisher",
           relation: "primary",
@@ -236,7 +235,7 @@ describe("issue body", () => {
     expect(body.match(/<!-- erodeglitz:story=/g)).toHaveLength(1);
   });
 
-  it("lists each source with its own headline", () => {
+  it("lists each source by name and link, never its headline (the issue is public)", () => {
     const story = makeStory();
     const body = renderIssueBody({
       story,
@@ -244,7 +243,6 @@ describe("issue body", () => {
       sources: [
         {
           name: "Dinakaran, Erode district",
-          title: "சிவகிரி வாரச்சந்தையில் தேங்காய் வரத்து அதிகரிப்பு",
           url: "https://www.dinakaran.com/district/erode_301026_3",
           trustTier: "T2_established_publisher",
           relation: "primary",
@@ -254,20 +252,22 @@ describe("issue body", () => {
       checks: [],
       possibleDuplicates: [],
     });
-    expect(body).toContain("1. “சிவகிரி வாரச்சந்தையில் தேங்காய் வரத்து அதிகரிப்பு”: Dinakaran, Erode district, <https://www.dinakaran.com/district/erode_301026_3>");
+    expect(body).toContain(
+      "1. Dinakaran, Erode district, <https://www.dinakaran.com/district/erode_301026_3>, published 06:33 IST 2026-10-30, tier T2_established_publisher, primary",
+    );
   });
 
-  it("titles: the editor's headline, else the lead source's headline, never the same text for every story of a run", () => {
+  it("titles: the editor's headline, else our own label, never the same text for every story of a run", () => {
     // Two real story ids from one run: UUIDv7, so their first eight characters (the creation time) are equal.
     const story = makeStory({ topic: "business", id: StoryIdSchema.parse("01a18dfb-0c1b-721f-8012-c1f39a5596ab") });
     const twin = makeStory({ topic: "business", id: StoryIdSchema.parse("01a18dfb-0c1b-7325-a023-8d8913b72d06") });
     expect(renderIssueTitle(story, makeDraft(story))).toBe(makeDraft(story).headlineTa);
-    expect(renderIssueTitle(story, undefined, "  ரூ.4.42 கோடிக்கு\n கொப்பரை ஏலம் ")).toBe("ரூ.4.42 கோடிக்கு கொப்பரை ஏலம் (business)");
+    expect(renderIssueTitle(story, undefined, "  பெருந்துறை ·\n தினமணி ")).toBe(`பெருந்துறை · தினமணி · business · ${story.id.slice(-8)}`);
     // Regression (first real draft run, 2026-10-30): ten issues were all titled "business story 01a18dfb".
     expect(renderIssueTitle(story, undefined)).not.toBe(renderIssueTitle(twin, undefined));
     expect(renderIssueTitle(story, undefined, "@someone said")).not.toContain("@someone");
     const sensitive = makeStory({ riskTier: "R2_SENSITIVE" });
-    expect(renderIssueTitle(sensitive, undefined, "கைது")).toBe(`[R2] கைது (${sensitive.topic})`);
+    expect(renderIssueTitle(sensitive, undefined, "கொடுமுடி")).toBe(`[R2] கொடுமுடி · ${sensitive.topic} · ${sensitive.id.slice(-8)}`);
   });
 
   it("asks for /approve-sensitive and the checklist on R2 stories", () => {

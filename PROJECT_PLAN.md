@@ -1,6 +1,6 @@
 # ErodeGlitz: Project Plan
 
-> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 376 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
+> **Status, 2026-10-31: Phase 1 setup.** The pipeline code, the workflows (following the Coimbatore 360 pattern the owner asked for, including its switches, see [Workflows](docs/WORKFLOWS.md)) and 377 passing tests are on GitHub. The `ErodeGlitz Newsroom` Sheet, its Apps Script bridge and Cloudinary are set up, five newspapers are approved, and manual collect and draft runs have opened review issues. Not live: there is no `LIVE` file, automatic collecting is paused, the Meta app and the Instagram token do not exist yet, and nothing has been posted.
 > Last updated: 2026-10-31. External facts below were checked against official documentation on that date. Re-check them before each phase goes live, because Meta, GitHub and the hosting providers change their products and terms often.
 
 ErodeGlitz is a Tamil-first Instagram page for local news from Erode city and Erode district, Tamil Nadu. This repository will hold an automated newsroom pipeline that:
@@ -32,7 +32,7 @@ Related documents:
 |---|---|
 | Files | `README.md` (2 lines) and `.gitignore` (standard Node.js template that already ignores `.env`, `.env.*` except `.env.example`, `node_modules/`, `dist`, `coverage`) |
 | History | One commit, `9be463f Initial commit`, on `master`. Working tree clean. |
-| Remote | `origin` = `https://github.com/kailash075/local-news-automation.git`, visibility **private** |
+| Remote | `origin` = `https://github.com/kailash075/local-news-automation.git`, visibility **public** (owner decision, 2026-10-31: standard Actions runners are free; issues therefore carry no newspaper text) |
 | Code, CI, tests | None |
 
 ### Local environment (Ubuntu 24.04.5 LTS, x86_64)
@@ -54,7 +54,7 @@ Related documents:
 
 - `gh` is logged in to two accounts. The globally **active** account, `kailashrajendiran`, gets HTTP 404 for this repository, so it has no access.
 - `kailash075` owns the repository. Since 2026-10-30 this repository has local git settings that commit as `kailash075` and push with its saved login, without changing the global account ([setup guide §2](docs/SETUP_GUIDE.md#2-local-development)).
-- `kailash075` is on **GitHub Free** (confirmed 2026-10-30: GitHub refuses branch protection on this private repository with "Upgrade to GitHub Pro"). On Free, a private repository gets **USD 12 per month of included Actions compute**, and has **no branch protection**, **no environment secrets** and **no required-reviewer deployment protection** (see [Operations §9](docs/OPERATIONS.md#9-cost-monitoring-and-budgets)).
+- `kailash075` is on **GitHub Free** (confirmed 2026-10-30: GitHub refuses branch protection on this private repository with "Upgrade to GitHub Pro"). On Free, a private repository gets **USD 12 per month of included Actions compute**, and has **no branch protection**, **no environment secrets** and **no required-reviewer deployment protection** (see [Operations §9](docs/OPERATIONS.md#9-cost-monitoring-and-budgets)). Since 2026-10-31 the repository is public, where GitHub Free does offer these three; none of them is set up yet.
 
 ### Done since (2026-10-30, local only, not pushed)
 
@@ -124,7 +124,7 @@ These rules hold in every phase. Code, tests and reviews enforce them.
 | Card images | Cloudinary Free, signed uploads, public URLs named by a SHA-256 of the card's template version and text | Instagram must fetch images from a public URL; same as Coimbatore 360 | Supabase Storage with signed URLs (the earlier plan); Cloudflare R2 |
 | Data access | Typed stores over the bridge, every row parsed with Zod; tests run the real bridge code on a fake Sheet | No database driver; no Docker needed in tests | — |
 | Instagram integration | Instagram API with Instagram Login (`graph.instagram.com`), Standard Access, own account only | Fully documented; no Facebook Page needed; Meta's table says App Review is not required for an app used only for a business you own | Unified Login (Meta recommends it for new integrations, but its token setup was not fully documented when checked); Facebook Login for Business |
-| Review desk | GitHub Issues in this private repository, with slash commands in comments | Free; works from the GitHub mobile app; full audit trail; no new account | Telegram bot (Phase 4 option) |
+| Review desk | GitHub Issues in this repository (public, so issues carry no newspaper text), with slash commands in comments | Free; works from the GitHub mobile app; full audit trail; no new account | Telegram bot (Phase 4 option) |
 | Graphics | HTML/CSS templates rendered by headless Chromium (Playwright) with bundled SIL OFL Tamil fonts, exported as JPEG | Chromium uses HarfBuzz, which shapes Tamil correctly; HTML is easy to design | Canvas libraries; SVG-based renderers whose Tamil shaping is unproven |
 | Captions | Phase 1: editor-written or template captions. Phase 3: Claude via `@anthropic-ai/sdk` structured outputs, default model `claude-opus-5-5`, under a hard budget | Zero cost until the owner approves spending; AI is an assistant, not an author of record | Other LLM providers |
 | Alerts | GitHub issues labelled `ops-alert` | Free email and mobile notifications | Email or Telegram |
@@ -236,7 +236,7 @@ Exit criteria: agreed quality bar met (for example, 90% "publishable with minor 
 
 | Item | Expected monthly cost | Notes |
 |---|---|---|
-| GitHub Actions | USD 0 if usage stays inside the plan's included compute | GitHub Free includes USD 12 per month for private repositories. Linux 2-core runners cost USD 0.006 per minute and the 1-vCPU `ubuntu-slim` runner costs USD 0.002 per minute. Without a payment method, usage is blocked (not billed) once the allowance is used up. Target: no more than 50% of the allowance. |
+| GitHub Actions | USD 0: standard runners are free in public repositories, and this one is public since 2026-10-31 | If it goes private again: GitHub Free includes USD 12 per month for private repositories. Linux 2-core runners cost USD 0.006 per minute and the 1-vCPU `ubuntu-slim` runner costs USD 0.002 per minute. Without a payment method, usage is blocked (not billed) once the allowance is used up. Target: no more than 50% of the allowance. |
 | Google Sheet and Apps Script | USD 0 | Up to 10 million cells per Sheet. Version history is built in; the owner also downloads a copy weekly. |
 | Cloudinary | USD 0 (Free plan) | Check the Free plan limits on the pricing page at setup; ErodeGlitz needs a few hundred MB a year. |
 | Instagram Platform API | USD 0 | |

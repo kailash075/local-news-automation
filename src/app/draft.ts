@@ -319,7 +319,6 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIs
       const source = deps.sourceFor(i.sourceId);
       return {
         name: source?.name ?? i.sourceId,
-        title: i.title,
         url: i.canonicalUrl,
         trustTier: source?.trustTier ?? "T3_other",
         relation: index === 0 ? "primary" : "corroborating",
@@ -337,7 +336,9 @@ export const runDrafts = async (deps: DraftDeps, onlyStoryId?: string, refreshIs
       ...(previewUrl === undefined ? {} : { previewUrl }),
     });
 
-    const title = renderIssueTitle(story, draft, items[0]?.title);
+    // Our own words only: the issue is public, and the newspapers allow discovery, not reuse of their text.
+    const papers = [...new Set(items.map((i) => CREDIT_TA[i.sourceId] ?? deps.sourceFor(i.sourceId)?.name ?? i.sourceId))].join(", ");
+    const title = renderIssueTitle(story, draft, `${placeDisplayTa(story.placeTags[0])} · ${papers}`);
     if (issueNumber === undefined) {
       const found = await deps.issues.findByMarker(STORY_LABEL, storyMarker(story.id));
       if (found.ok && found.value !== undefined) issueNumber = found.value.number;

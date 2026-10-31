@@ -11,10 +11,12 @@ import {
 import { formatIst } from "../publishing/ist.ts";
 import { shortHash } from "./revision-hash.ts";
 
+/**
+ * A source as the issue shows it: name and link, never the source's own headline or text. The repository is public, so
+ * the issue is too (docs/ARCHITECTURE.md §5.9); the editor reads the story at the link.
+ */
 export type IssueSource = {
   name: string;
-  /** The source's own headline, shown so the editor knows the story without opening the link. */
-  title: string;
   url: string;
   trustTier: TrustTier;
   relation: StoryRelation;
@@ -88,14 +90,14 @@ export const REVIEWER_CHECKLIST: readonly string[] = [
 ];
 
 /**
- * The editor's headline once there is a draft; before that, the lead source's headline and the topic, so the issues of
- * one run can be told apart. (Story ids are UUIDv7: their first characters are the creation time, the same for a run.)
+ * The editor's headline once there is a draft. Before that, our own label (place and sources), the topic and the end of
+ * the story id, so the issues of one run can be told apart; never a source's headline, because the issue is public.
+ * (Story ids are UUIDv7: their first characters are the creation time, the same for a run.)
  */
-export const renderIssueTitle = (story: Story, draft: DraftRevision | undefined, leadSourceTitle?: string): string => {
+export const renderIssueTitle = (story: Story, draft: DraftRevision | undefined, label?: string): string => {
   const tier = story.riskTier === "R2_SENSITIVE" || story.disputed ? "[R2] " : "";
-  const lead = leadSourceTitle?.replace(/\s+/g, " ").trim();
-  const headline =
-    draft?.headlineTa ?? (lead === undefined || lead === "" ? `${story.topic} story ${story.id.slice(-8)}` : `${lead} (${story.topic})`);
+  const about = label?.replace(/\s+/g, " ").trim();
+  const headline = draft?.headlineTa ?? [about, story.topic, story.id.slice(-8)].filter((part) => part !== undefined && part !== "").join(" · ");
   return `${tier}${headline.replace(/@(?=[A-Za-z0-9])/g, "@\u200B")}`.slice(0, 200);
 };
 
@@ -128,7 +130,7 @@ export const renderIssueBody = (input: IssueBodyInput): string => {
     const published = s.publishedAt === undefined ? "date unknown" : `published ${formatIst(new Date(s.publishedAt))} ${s.publishedAt.slice(0, 10)}`;
     const url = safeUrl(s.url);
     lines.push(
-      `${i + 1}. “${neutralise(s.title)}”: ${neutralise(s.name)}, ${url === undefined ? "(invalid URL)" : `<${url}>`}, ${published}, tier ${s.trustTier}, ${s.relation}`,
+      `${i + 1}. ${neutralise(s.name)}, ${url === undefined ? "(invalid URL)" : `<${url}>`}, ${published}, tier ${s.trustTier}, ${s.relation}`,
     );
   });
   lines.push("");

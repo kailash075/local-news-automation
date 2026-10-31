@@ -56,7 +56,7 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 | Up to 50 reels a day, posted the moment they are made | At most 6 posts a day, 08:00 to 21:00 IST, at least 30 minutes apart | Owner decision (cadence) and spam-risk control (risk R11) |
 | Reels with a synthetic Tamil voice | Single-image posts (1080×1350) | Reels and video are non-goals for now. They can be a later phase if the owner wants them; a voice service would need its own terms review. |
 | Queue files and logs committed to git by the bot | Everything is in the Sheet; the bot never commits | No runner or git state; the repository only changes through reviewed commits |
-| Public repository | Private repository | Review issues contain unpublished, possibly unverified material |
+| Public repository | Public too (owner decision, 2026-10-31), so standard runners are free | Issues are public, so no newspaper text goes into issue titles, issue bodies or run summaries; editors read each story at its source link. Everything typed in an issue is public. |
 | Story submission by e-mail to a bridge Gmail | Tips arrive as GitHub issues from a template and need the same verification | No inbound e-mail parsing; one audit trail |
 
 ## 4. Switches

@@ -159,7 +159,8 @@ export const runTriage = async (deps: TriageDeps): Promise<TriageReport> => {
       if (story.status === "discarded") discarded += 1;
       else newStories += 1;
       const dupes = d.possibleDuplicates.length === 0 ? "" : ` (possible duplicate of ${d.possibleDuplicates.length} story/stories)`;
-      lines.push(`- new story: ${d.item.title.slice(0, 80)} [${note}]${dupes}`);
+      // Run summaries are public, like the repository: no headline from the source, only our own words.
+      lines.push(`- new story ${d.storyId.slice(-8)} from ${deps.sourceFor(d.item.sourceId)?.name ?? d.item.sourceId} [${note}]${dupes}`);
     } else {
       attachments.push({ itemId: d.item.id, storyId: d.storyId, relation: "corroborating" });
       attached += 1;
