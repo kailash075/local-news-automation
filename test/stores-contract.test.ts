@@ -469,6 +469,7 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
     it("round-trip Instagram credentials", async () => {
       expect(await s.tokens.getInstagram()).toBeUndefined();
       const credentials = {
+        api: "instagram_login" as const,
         igUserId: "17841400000000000",
         accessToken: "IGAAexample",
         obtainedAt: iso(h.clock.now()),
@@ -479,6 +480,9 @@ describe.each(implementations)("stores contract: %s", (_name, open) => {
       const refreshed = { ...credentials, accessToken: "IGAArefreshed" };
       await s.tokens.saveInstagram(refreshed);
       expect(await s.tokens.getInstagram()).toEqual(refreshed);
+      const unified = { api: "unified_login" as const, igUserId: "17841400000000000", accessToken: "EAAexample", obtainedAt: iso(h.clock.now()) };
+      await s.tokens.saveInstagram(unified);
+      expect(await s.tokens.getInstagram()).toEqual(unified);
     });
   });
 });

@@ -8,6 +8,7 @@ import { TABLES } from "./tables.ts";
 const TOKEN = "IGAAQexampleLongLivedToken0123456789abcdefXYZ";
 
 const credentials = (t: TestSheet) => ({
+  api: "instagram_login" as const,
   igUserId: "17841400000000000",
   accessToken: TOKEN,
   obtainedAt: iso(t.clock.now()),
@@ -28,6 +29,16 @@ describe("token storage in the bridge's Script properties", () => {
     expect(Buffer.from(String(envelope["ciphertext"]), "base64").toString("latin1")).not.toContain("IGAA");
     expect(envelope).toMatchObject({ keyVersion: 1, expiresAt: credentials(t).expiresAt });
     expect(everyCell(t)).not.toContain(TOKEN);
+  });
+
+  it("stores a Unified login token without an expiry date, because it does not expire", async () => {
+    const t = await freshSheet();
+    const unified = { api: "unified_login" as const, igUserId: "17841400000000000", accessToken: TOKEN, obtainedAt: iso(t.clock.now()) };
+    await t.stores.tokens.saveInstagram(unified);
+    const envelope = JSON.parse(stored(t)) as Record<string, unknown>;
+    expect(envelope).not.toHaveProperty("expiresAt");
+    expect(stored(t)).not.toContain(TOKEN);
+    expect(await t.stores.tokens.getInstagram()).toEqual(unified);
   });
 
   it("detects a tampered value", async () => {

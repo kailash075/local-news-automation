@@ -61,7 +61,8 @@ export type GateInput = {
   };
   /** Live `content_publishing_limit`; undefined when it could not be read. */
   quota: { usage: number; total: number } | undefined;
-  token: { present: boolean; expiresAt?: Date };
+  /** "never": Unified login's system-user token does not expire. */
+  token: { present: boolean; expiresAt?: Date | "never" };
 };
 
 export type GateResult =
@@ -154,7 +155,7 @@ export const evaluateGates = (input: GateInput): GateResult => {
 
   // 7. Token present and not expired.
   if (!input.token.present) operational({ code: "token", message: "no Instagram token stored" });
-  else if (input.token.expiresAt === undefined || input.token.expiresAt.getTime() <= now.getTime()) {
+  else if (input.token.expiresAt === undefined || (input.token.expiresAt !== "never" && input.token.expiresAt.getTime() <= now.getTime())) {
     operational({ code: "token", message: "Instagram token has expired" });
   }
 

@@ -37,6 +37,7 @@ export { fixtures };
 
 export const EDITOR = GitHubLoginSchema.parse("kailash075");
 export const TOKEN = "IGAAsecretsecretsecretsecretsecretsecretsecretsecret123";
+export const UNIFIED_TOKEN = "EAAGsecretsecretsecretsecretsecretsecretsecretsecret456";
 export const IG_USER_ID = "17841400000000000";
 /** 12:00 IST on 30 Oct 2026: inside the 08:00 to 21:00 posting window. */
 export const NOON_IST = new Date("2026-10-30T06:30:00Z");
@@ -138,12 +139,21 @@ export const approval = (
 
 export const officialEvidence = (): VerificationEvidence => ({ kind: "official_source", sourceItemId: SourceItemIdSchema.parse(randomUUID()) });
 
-export const credentials = (overrides: Partial<InstagramCredentials> = {}): InstagramCredentials => ({
+export const credentials = (overrides: Partial<Extract<InstagramCredentials, { api: "instagram_login" }>> = {}): InstagramCredentials => ({
+  api: "instagram_login",
   igUserId: IG_USER_ID,
   accessToken: TOKEN,
   obtainedAt: toIso(new Date("2026-10-20T00:00:00Z")),
   expiresAt: toIso(new Date("2026-12-19T00:00:00Z")),
   ...overrides,
+});
+
+/** A Unified login token: graph.facebook.com, does not expire. */
+export const unifiedCredentials = (): InstagramCredentials => ({
+  api: "unified_login",
+  igUserId: IG_USER_ID,
+  accessToken: UNIFIED_TOKEN,
+  obtainedAt: toIso(new Date("2026-10-20T00:00:00Z")),
 });
 
 // ---------------------------------------------------------------- in-memory stores
@@ -329,7 +339,7 @@ export const memoryTokens = (initial: InstagramCredentials | undefined): TokenSt
 
 // ---------------------------------------------------------------- fake Meta
 
-export type Endpoint = "create" | "status" | "publish" | "permalink" | "limit" | "media" | "refresh" | "me";
+export type Endpoint = "create" | "status" | "publish" | "permalink" | "limit" | "media" | "refresh" | "me" | "assigned";
 
 export type RecordedCall = { endpoint: Endpoint; method: string; url: string; headers: Record<string, string>; body: string | undefined };
 
@@ -358,6 +368,7 @@ const endpointOf = (method: string, url: URL): Endpoint => {
   if (last === "content_publishing_limit") return "limit";
   if (last === "media") return "media";
   if (last === "me") return "me";
+  if (last === "assigned_instagram_accounts") return "assigned";
   if (url.searchParams.get("fields")?.startsWith("status_code") === true) return "status";
   if (url.searchParams.get("fields") === "permalink") return "permalink";
   throw new Error(`unexpected request ${method} ${url.pathname}`);
@@ -374,6 +385,7 @@ export const fakeMeta = (): FakeMeta => {
     media: () => json(fixtures.mediaEmpty),
     refresh: () => json(fixtures.refresh),
     me: () => json(fixtures.me),
+    assigned: () => json(fixtures.assignedAccounts),
   };
   const fetch: FetchFn = async (input, init) => {
     const url = new URL(input);
@@ -461,7 +473,7 @@ export const world = async (options: WorldOptions = {}): Promise<World> => {
       decisions: memoryDecisions(decisions),
       evidence: memoryEvidence(new Map([[story.id, options.evidence ?? [officialEvidence()]]])),
     },
-    createClient: (accessToken: string) => createInstagramClient({ fetch: meta.fetch, accessToken, graphVersion: "v26.0" }),
+    createClient: ({ accessToken, api }: InstagramCredentials) => createInstagramClient({ fetch: meta.fetch, accessToken, api, graphVersion: "v26.0" }),
     clock,
     sleep: () => Promise.resolve(),
     leaseOwner: "run-1",

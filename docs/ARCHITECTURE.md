@@ -30,7 +30,7 @@ flowchart LR
   DB[("Google Sheet, through the Apps Script bridge")]
   OBJ[("Card images (Cloudinary)")]
   GHI["GitHub Issues review desk"]
-  IG["Instagram API (graph.instagram.com)"]
+  IG["Instagram API (graph.facebook.com)"]
   LLM["Claude API (Phase 3, optional)"]
 
   S1 --> C
@@ -65,8 +65,8 @@ Each workflow runs `node src/jobs/<name>.ts` (the same command as `pnpm run job:
 | `publish.yml` | from an approval when `PUBLISH_ON_APPROVAL` is `true`; catch-up every 2 h, 08:47 to 20:47 IST; manual (dry run by default) | `ubuntu-slim` | Publish one due item | `publisher`, no cancel |
 | `collect-switch.yml` | manual | `ubuntu-slim` | Pause or start automatic collecting and drafting (Coimbatore 360's collect-switch; a Sheet switch) | `collect-switch` |
 | `status.yml` | daily 07:13 IST; manual | `ubuntu-slim` | Read-only health report | `status` |
-| `token-refresh.yml` | Mondays 03:17 IST; manual | `ubuntu-slim` | Refresh the long-lived Instagram token | `token` |
-| `import-token.yml` | manual only (Phase 2) | `ubuntu-slim` | Owner-only import of a token from a temporary secret, after read-only checks (`/me` and the publishing quota); stored encrypted | `token` |
+| `token-refresh.yml` | Mondays 03:17 IST; manual | `ubuntu-slim` | Refresh an Instagram login token; for a Unified login token, which does not expire, a read-only check that Meta still accepts it | `token` |
+| `import-token.yml` | manual only (Phase 2) | `ubuntu-slim` | Owner-only import of a token from a temporary secret, after read-only checks (which account the token reaches, and the publishing quota); stored encrypted | `token` |
 | `maintenance.yml` | daily schedule; manual (Phase 1) | `ubuntu-slim` | Retention clean-up, daily digest; weekly encrypted backup export | `maintenance` |
 | `migrate.yml` | manual only | `ubuntu-slim` | Create the Sheet's tabs and columns and run the Sheets self test. Other jobs check the layout version and refuse to run on a mismatch. | `migrate` |
 
@@ -284,7 +284,7 @@ The repository is **public** (owner decision, 2026-10-31), so standard Actions r
 
 ### 5.10 Publishing
 
-Instagram API with Instagram Login, host `graph.instagram.com`, pinned Graph API version (`v26.0`, the latest when checked; introduced 2026-07-29). Flow, from Meta's content publishing guide:
+Instagram API with Unified login, host `graph.facebook.com`, with a system user's token that does not expire (setup guide §6.3). A token from the older Instagram login (host `graph.instagram.com`, 60 days, refreshed weekly) still works if one is imported; new apps no longer get that setup. Pinned Graph API version (`v26.0`, the latest when checked; introduced 2026-07-29). Flow, from Meta's content publishing guide:
 
 1. `POST /<IG_ID>/media` with `image_url`, `caption` and `alt_text` returns a container ID.
 2. `GET /<CONTAINER_ID>?fields=status_code` returns `IN_PROGRESS`, `FINISHED`, `ERROR`, `EXPIRED` or `PUBLISHED`. Meta suggests polling about once a minute for no more than 5 minutes.
@@ -418,7 +418,7 @@ The system turns the kill switch on automatically on authentication or token err
 | `SHEET_BRIDGE_URL` (Apps Script web app URL) and `SHEET_BRIDGE_KEY` (the bridge's `BRIDGE_KEY`) | GitHub repository secrets; the key also in the bridge's Script properties | all jobs | on suspicion; yearly (new key in Script properties, then the secret) |
 | `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` | GitHub repository secrets | render, publish | on suspicion; yearly |
 | `TOKEN_ENCRYPTION_KEY` (32 random bytes, base64) | GitHub repository secret | token import, refresh, publish | yearly; `key_version` allows rolling |
-| Instagram long-lived token | Bridge Script properties, encrypted | publish, refresh | refreshed weekly (valid 60 days) |
+| Instagram token (Unified login, system user) | Bridge Script properties, encrypted | publish, status | does not expire; replace on suspicion (**Revoke tokens** on the system user, then a new token). An Instagram login token is refreshed weekly (valid 60 days). |
 | `IG_BOOTSTRAP_TOKEN` | Temporary GitHub secret, deleted right after import | `import-token.yml` | single use |
 | `ANTHROPIC_API_KEY` (Phase 3) | GitHub repository secret | draft | on suspicion |
 
@@ -428,7 +428,7 @@ Environment-scoped secrets would be better, but GitHub Free does not offer them 
 
 - Sheet: not shared with anyone; the Google account has two-factor authentication; the bridge's `@OnlyCurrentDoc` annotation limits it to this one Sheet (`spreadsheets.currentonly`); every request needs the key; the bridge never deletes rows and refuses changes to append-only tabs.
 - Card images are public on Cloudinary at URLs named by a SHA-256 of the card's template version and text, so they cannot be guessed without the exact card text. The URLs appear in the review issue, which is public, and in the request to Meta, so anyone reading an issue can see the card of a story that is not approved yet. Uploads are signed; there is no unsigned upload preset.
-- The token is sent in a header where Meta supports it (to be verified in Phase 2), never in a logged URL. A logger redaction list covers `access_token`, `Authorization`, `apikey`, `password` and secret names.
+- The token is sent as an `Authorization: Bearer` header, as Meta's content publishing guide shows, never in a logged URL. A logger redaction list covers `access_token`, `Authorization`, `apikey`, `password` and secret names.
 - `GITHUB_TOKEN` permissions are declared per workflow. There are no `pull_request_target` workflows. Untrusted text reaches scripts only through environment variables.
 - Supply chain: `pnpm install --frozen-lockfile`; build scripts only for allowlisted packages; a minimum release age for new package versions if pnpm 11 supports it (verify in Phase 0); actions pinned to full commit SHAs; Dependabot.
 - Prompt injection: source text is untrusted. The model only drafts from a structured fact sheet, has no tools, and its output is schema-checked, fact-checked and human-approved.
@@ -542,7 +542,7 @@ Rules:
 
 | Topic | Chosen | Not chosen, and why |
 |---|---|---|
-| Instagram login type | Instagram Login | Facebook Login for Business needs a linked Facebook Page and Page token. Unified Login is recommended by Meta for new integrations and needs a business portfolio, but its system-user token setup was not documented on the pages checked; re-evaluate in Phase 2. |
+| Instagram login type | Unified login, with a system user's token from Business settings (2026-10-31) | Instagram Login: the dashboard said on 2026-10-31 that it "is not available for newer apps"; the code keeps it as a fallback for its tokens. Facebook Login for Business needs a linked Facebook Page and Page token. The dashboard's own **Generate token** for Unified login showed no token (setup guide §6.3). |
 | Review desk | GitHub Issues | Telegram (new account, polling); a web admin (needs hosting and authentication); editing the Sheet directly (no per-command audit trail, and easy to break on a phone) |
 | Rendering | Chromium | SVG-to-image or canvas libraries need manual line breaking, and their Tamil shaping would have to be proven; Satori relies on opentype.js rather than HarfBuzz, which is a known risk for complex scripts (unverified for Tamil) |
 | Storage | Google Sheet through an Apps Script bridge (owner decision, 2026-10-30, same as Coimbatore 360) | Supabase Postgres (the earlier plan: real transactions and constraints; replaced at the owner's request); committing state files to git (conflicts with concurrent runs) |

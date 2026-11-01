@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createImagesFromEnv, missingForImages } from "../config/env.ts";
 import { liveFileExists } from "../config/live.ts";
 import { createContentChecker, describeOutcome } from "../app/publish.ts";
+import type { InstagramCredentials } from "../domain/ports.ts";
 import { createIssuesClient } from "../github/issues.ts";
 import { appendSummary, setOutput } from "../ops/actions.ts";
 import { log, registerSecret } from "../ops/logger.ts";
@@ -14,9 +15,9 @@ await runJob(
   async ({ env, stores, clock, count }) => {
     const objects = createImagesFromEnv(env);
     const leaseOwner = `gha-${env.GITHUB_RUN_ID}-${process.env["GITHUB_RUN_ATTEMPT"] ?? "1"}`;
-    const createClient = (accessToken: string) => {
+    const createClient = ({ accessToken, api }: InstagramCredentials) => {
       registerSecret(accessToken);
-      return createInstagramClient({ fetch: globalThis.fetch, accessToken, graphVersion: env.IG_GRAPH_VERSION });
+      return createInstagramClient({ fetch: globalThis.fetch, accessToken, api, graphVersion: env.IG_GRAPH_VERSION });
     };
     const common = { env, live: liveFileExists(), stores, createClient, clock, sleep: (ms: number) => sleep(ms), leaseOwner };
 

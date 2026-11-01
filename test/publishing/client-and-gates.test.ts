@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { actionFor, backoffMs, classifyError } from "../../src/publishing/errors.ts";
+import type { InstagramApi } from "../../src/domain/ports.ts";
 import { evaluateGates, type GateInput } from "../../src/publishing/gates.ts";
 import { createInstagramClient, redact, type InstagramClientError } from "../../src/publishing/instagram-client.ts";
 import { formatIst, insideWindow, istMinuteOfDay, nextIstTime, startOfIstDay, toIso } from "../../src/publishing/ist.ts";
-import { approval, fakeMeta, fixtures, IG_USER_ID, json, makeDraft, makeStory, networkError, NOON_IST, RENDER_SHA, TOKEN } from "./fakes.ts";
+import { approval, fakeMeta, fixtures, IG_USER_ID, json, makeDraft, makeStory, networkError, NOON_IST, RENDER_SHA, TOKEN, UNIFIED_TOKEN } from "./fakes.ts";
 
-const client = (meta = fakeMeta()) => ({ meta, ig: createInstagramClient({ fetch: meta.fetch, accessToken: TOKEN, graphVersion: "v26.0" }) });
+const client = (meta = fakeMeta(), api: InstagramApi = "instagram_login", accessToken = TOKEN) => ({
+  meta,
+  ig: createInstagramClient({ fetch: meta.fetch, accessToken, api, graphVersion: "v26.0" }),
+});
 
 describe("Instagram client", () => {
   it("sends the token in a header and never in the URL", async () => {
@@ -16,7 +20,7 @@ describe("Instagram client", () => {
     await ig.getPermalink("2");
     await ig.getPublishingLimit(IG_USER_ID);
     await ig.listRecentMedia(IG_USER_ID);
-    await ig.getAccount();
+    await ig.listAccounts();
     expect(meta.calls).toHaveLength(7);
     for (const call of meta.calls) {
       expect(call.url.startsWith("https://graph.instagram.com/v26.0/")).toBe(true);
@@ -24,6 +28,30 @@ describe("Instagram client", () => {
       expect(call.headers["authorization"]).toBe(`Bearer ${TOKEN}`);
     }
     expect(meta.writes().map((c) => c.endpoint)).toEqual(["create", "publish"]);
+  });
+
+  it("uses graph.facebook.com for a Unified login token, with the same publishing calls", async () => {
+    const { meta, ig } = client(fakeMeta(), "unified_login", UNIFIED_TOKEN);
+    await ig.createImageContainer({ igUserId: IG_USER_ID, imageUrl: "https://s.example/a.jpg", caption: "c", altText: "a" });
+    await ig.getContainerStatus("1");
+    await ig.publishContainer(IG_USER_ID, "1");
+    await ig.getPermalink("2");
+    await ig.getPublishingLimit(IG_USER_ID);
+    await ig.listRecentMedia(IG_USER_ID);
+    expect(await ig.listAccounts()).toEqual({
+      ok: true,
+      value: [
+        { userId: "17841499999999999", username: "another.account" },
+        { userId: IG_USER_ID, username: "erodeglitz" },
+      ],
+    });
+    expect(meta.calls.map((c) => c.endpoint)).toEqual(["create", "status", "publish", "permalink", "limit", "media", "assigned"]);
+    for (const call of meta.calls) {
+      expect(call.url.startsWith("https://graph.facebook.com/v26.0/")).toBe(true);
+      expect(call.url).not.toContain(UNIFIED_TOKEN);
+      expect(call.headers["authorization"]).toBe(`Bearer ${UNIFIED_TOKEN}`);
+    }
+    expect(meta.calls[6]?.url).toBe("https://graph.facebook.com/v26.0/me/assigned_instagram_accounts?fields=id,username");
   });
 
   it("parses documented responses", async () => {
@@ -35,16 +63,19 @@ describe("Instagram client", () => {
     expect(await ig.getContainerStatus("1")).toEqual({ ok: true, value: { status: "FINISHED" } });
     expect(await ig.getPublishingLimit(IG_USER_ID)).toEqual({ ok: true, value: { quotaUsage: 2, quotaTotal: 50, quotaDurationSeconds: 86400 } });
     expect(await ig.refreshToken()).toEqual({ ok: true, value: { accessToken: fixtures.refresh.access_token, expiresInSeconds: 5183944 } });
-    expect(await ig.getAccount()).toEqual({ ok: true, value: { userId: IG_USER_ID, username: "erodeglitz" } });
+    expect(await ig.listAccounts()).toEqual({ ok: true, value: [{ userId: IG_USER_ID, username: "erodeglitz" }] });
   });
 
   it("reads the account from a plain object too, and refuses an ID sent as a number", async () => {
     const { meta, ig } = client();
     meta.handlers.me = () => json(fixtures.meFlat);
-    expect(await ig.getAccount()).toEqual({ ok: true, value: { userId: IG_USER_ID, username: "erodeglitz" } });
+    expect(await ig.listAccounts()).toEqual({ ok: true, value: [{ userId: IG_USER_ID, username: "erodeglitz" }] });
     expect(meta.calls[0]?.url).toBe("https://graph.instagram.com/v26.0/me?fields=user_id,username");
     meta.handlers.me = () => new Response('{"user_id":17841400000000001,"username":"erodeglitz"}', { status: 200 });
-    expect(await ig.getAccount()).toMatchObject({ ok: false, error: { kind: "ambiguous" } });
+    expect(await ig.listAccounts()).toMatchObject({ ok: false, error: { kind: "ambiguous" } });
+    const unified = client(meta, "unified_login", UNIFIED_TOKEN);
+    meta.handlers.assigned = () => new Response('{"data":[{"id":17841400000000001,"username":"erodeglitz"}]}', { status: 200 });
+    expect(await unified.ig.listAccounts()).toMatchObject({ ok: false, error: { kind: "ambiguous" } });
   });
 
   it("parses Meta's error envelope", async () => {
@@ -91,6 +122,7 @@ describe("Instagram client", () => {
   it("redacts token-shaped strings", () => {
     expect(redact(`x access_token=${TOKEN}&y=1 Bearer abc.def`)).toBe("x access_token=[REDACTED]&y=1 Bearer [REDACTED]");
     expect(redact(`token ${TOKEN} here`)).not.toContain(TOKEN);
+    expect(redact(`token ${UNIFIED_TOKEN} here`)).toBe("token [REDACTED] here");
     expect(redact("short", ["abc"])).toBe("short");
   });
 });
@@ -195,6 +227,9 @@ describe("gates", () => {
     expect(codes({ ...base, quota: undefined })).toContain("quota");
     expect(codes({ ...base, quota: { usage: 50, total: 50 } })).toContain("quota");
     expect(codes({ ...base, token: { present: false } })).toContain("token");
+    expect(codes({ ...base, token: { present: true } })).toContain("token");
+    expect(codes({ ...base, token: { present: true, expiresAt: new Date(NOON_IST.getTime() - 1) } })).toContain("token");
+    expect(codes({ ...base, token: { present: true, expiresAt: "never" } })).toEqual([]);
     expect(codes({ ...base, story: { ...story, status: "on_hold" } })).toContain("story_state");
     expect(codes({ ...base, decisions: [] })).toContain("no_approval");
     expect(codes({ ...base, editors: [] })).toContain("editor_not_allowed");

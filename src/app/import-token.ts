@@ -1,8 +1,8 @@
-import type { Clock, InstagramCredentials, TokenStore } from "../domain/ports.ts";
+import type { Clock, InstagramApi, InstagramCredentials, TokenStore } from "../domain/ports.ts";
 import type { GitHubLogin, IsoDateTime } from "../domain/types.ts";
 import { err, ok, type Result } from "../lib/result.ts";
 import { describeClientError } from "../publishing/errors.ts";
-import type { InstagramClient, PublishingLimit } from "../publishing/instagram-client.ts";
+import type { AccountInfo, InstagramClient, InstagramClientError, PublishingLimit } from "../publishing/instagram-client.ts";
 import { toIso } from "../publishing/ist.ts";
 
 /**
@@ -11,7 +11,10 @@ import { toIso } from "../publishing/ist.ts";
  * properties. Nothing is posted.
  */
 
-/** Meta: "Access tokens from the App Dashboard are long-lived and are valid for 60 days" (get-started guide, read 2026-10-31). */
+/**
+ * Instagram login only. Meta: "Access tokens from the App Dashboard are long-lived and are valid for 60 days"
+ * (get-started guide, read 2026-10-31). A Unified login token does not expire.
+ */
 export const DASHBOARD_TOKEN_DAYS = 60;
 
 /** One line of printable characters without spaces. */
@@ -22,14 +25,24 @@ export type ImportRequest = { token: string; actor: string };
 export type ImportDeps = {
   tokens: TokenStore;
   clock: Clock;
-  createClient: (accessToken: string) => InstagramClient;
+  createClient: (accessToken: string, api: InstagramApi) => InstagramClient;
   /** IG_USERNAME: the only account this pipeline serves. */
   username: string;
   owner: GitHubLogin | undefined;
 };
 
-/** `expiresAt` is Meta's stated lifetime counted from now; the first weekly refresh replaces it with Meta's exact figure. */
-export type ImportedToken = { username: string; expiresAt: IsoDateTime; quota: PublishingLimit };
+/**
+ * `expiresAt` is absent for a Unified login token, which does not expire. For an Instagram login token it is Meta's
+ * stated lifetime counted from now; the first weekly refresh replaces it with Meta's exact figure.
+ */
+export type ImportedToken = { username: string; api: InstagramApi; expiresAt?: IsoDateTime; quota: PublishingLimit };
+
+type Probe = { api: InstagramApi; client: InstagramClient; accounts: Result<readonly AccountInfo[], InstagramClientError> };
+
+const probe = async (deps: ImportDeps, token: string, api: InstagramApi): Promise<Probe> => {
+  const client = deps.createClient(token, api);
+  return { api, client, accounts: await client.listAccounts() };
+};
 
 export const importToken = async (deps: ImportDeps, request: ImportRequest): Promise<Result<ImportedToken, string>> => {
   if (deps.owner === undefined || request.actor !== deps.owner) {
@@ -39,32 +52,41 @@ export const importToken = async (deps: ImportDeps, request: ImportRequest): Pro
     return err("IG_BOOTSTRAP_TOKEN does not look like a token: it should be one line without spaces. Copy only the token from the Meta dashboard and set the secret again.");
   }
 
-  const client = deps.createClient(request.token);
-  const account = await client.getAccount();
-  if (!account.ok) {
-    const hint = request.token.startsWith("EAA")
-      ? " This looks like a Facebook token; generate it under Instagram, API setup with Instagram business login."
-      : "";
-    return err(`Meta did not accept the token (${describeClientError(account.error)}).${hint}`);
+  // Meta gives new apps only Unified login, so that is tried first; a token from the older Instagram login still works.
+  const unified = await probe(deps, request.token, "unified_login");
+  const found = unified.accounts.ok ? unified : await probe(deps, request.token, "instagram_login");
+  if (!found.accounts.ok) {
+    const unifiedError = unified.accounts.ok ? "" : describeClientError(unified.accounts.error);
+    return err(`Meta did not accept the token. Unified login: ${unifiedError}. Instagram login: ${describeClientError(found.accounts.error)}.`);
   }
-  // The other account's name is not repeated: the run summary of this public repository is public.
-  if (account.value.username.toLowerCase() !== deps.username.toLowerCase()) {
-    return err(`The token belongs to another Instagram account, not @${deps.username}. Generate it next to the ${deps.username} account.`);
+  // Other accounts are not named: the run summary of this public repository is public.
+  const account = found.accounts.value.find((a) => a.username.toLowerCase() === deps.username.toLowerCase());
+  if (account === undefined) {
+    return err(
+      `The token does not give access to @${deps.username}. For a system user's token, check in Business settings that the system user has the ${deps.username} Instagram account assigned; otherwise generate the token for the ${deps.username} account.`,
+    );
   }
-  const quota = await client.getPublishingLimit(account.value.userId);
+  const quota = await found.client.getPublishingLimit(account.userId);
   if (!quota.ok) return err(`The publishing quota could not be read (${describeClientError(quota.error)}).`);
+  // The publisher's first live call reads recent posts (duplicate guard); a permission error there would trip the kill switch.
+  const media = await found.client.listRecentMedia(account.userId, 1);
+  if (!media.ok) return err(`The account's posts could not be read (${describeClientError(media.error)}).`);
 
   const now = deps.clock.now();
-  const credentials: InstagramCredentials = {
-    igUserId: account.value.userId,
-    accessToken: request.token,
-    obtainedAt: toIso(now),
-    expiresAt: toIso(new Date(now.getTime() + DASHBOARD_TOKEN_DAYS * 86_400_000)),
-  };
+  const base = { igUserId: account.userId, accessToken: request.token, obtainedAt: toIso(now) };
+  const credentials: InstagramCredentials =
+    found.api === "unified_login"
+      ? { ...base, api: "unified_login" }
+      : { ...base, api: "instagram_login", expiresAt: toIso(new Date(now.getTime() + DASHBOARD_TOKEN_DAYS * 86_400_000)) };
   await deps.tokens.saveInstagram(credentials);
   const stored = await deps.tokens.getInstagram();
-  if (stored?.accessToken !== credentials.accessToken || stored.igUserId !== credentials.igUserId) {
+  if (stored?.accessToken !== credentials.accessToken || stored.igUserId !== credentials.igUserId || stored.api !== credentials.api) {
     throw new Error("the Instagram token was saved but could not be read back");
   }
-  return ok({ username: account.value.username, expiresAt: credentials.expiresAt, quota: quota.value });
+  return ok({
+    username: account.username,
+    api: credentials.api,
+    quota: quota.value,
+    ...(credentials.api === "instagram_login" ? { expiresAt: credentials.expiresAt } : {}),
+  });
 };

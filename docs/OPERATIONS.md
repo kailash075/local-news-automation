@@ -105,7 +105,7 @@ Alerts are GitHub issues labelled `ops-alert`, with one open issue per alert key
 | Alert key | Trigger | First response |
 |---|---|---|
 | `kill-switch-tripped` | Automatic trip | §4, then the matching runbook in §6 |
-| `token-expiring` | Under 14 days of validity left | Run `token-refresh.yml` by hand; if it fails, see §8 |
+| `token-expiring` | Under 14 days of validity left (Instagram login tokens only) | Run `token-refresh.yml` by hand; if it fails, see §8 |
 | `token-invalid` | Authentication error | Runbook 6.D |
 | `publish-failed` | Permanent error, or retries used up | Read `publish_attempts`; fix; re-queue |
 | `publish-unknown` | Ambiguous result | Runbook 6.C |
@@ -153,8 +153,8 @@ Open an issue labelled `incident` for every incident, and record the timeline an
 ### 6.D Token expired or invalid
 
 1. Publishing has stopped (automatic trip).
-2. If the token can still be refreshed (less than 60 days old and not revoked), run `token-refresh.yml`.
-3. Otherwise generate a new token in the Meta dashboard and import it ([setup guide §6.3](SETUP_GUIDE.md#63-token-manual-approval)).
+2. A Unified login token (the system user's, the normal case) does not expire. If Meta refuses it, it was revoked, the system user lost the Instagram account or the app, or the app left the business portfolio. Check Business settings, then **System users**, then `erodeglitz-publisher` and its assigned assets, then generate a new token there and import it ([setup guide §6.3](SETUP_GUIDE.md#63-token-manual-approval)).
+3. An Instagram login token (older apps only): if it can still be refreshed (less than 60 days old and not revoked), run `token-refresh.yml`; otherwise generate a new token and import it.
 4. Run **status** and check that it shows the token and the quota, then resume (§4).
 
 ### 6.E Instagram restriction or spam flag (4 / 2207051, 25 / 2207050)
@@ -219,11 +219,11 @@ Captions fall back to manual automatically. Nothing else is affected. Raising th
 
 | Event | Action |
 |---|---|
-| Initial import | [Setup guide §5.3](SETUP_GUIDE.md#63-token-manual-approval) |
-| Weekly | `token-refresh.yml` refreshes (the token must be at least 24 hours old and unexpired) and stores the new expiry |
-| Under 14 days left | `token-expiring` alert |
-| Expired, or refresh impossible | Generate a new token in the dashboard and re-import it |
-| Suspected compromise | Remove app access in Instagram settings, generate and import a new token, check recent posts |
+| Initial import | [Setup guide §6.3](SETUP_GUIDE.md#63-token-manual-approval) |
+| Weekly | `token-refresh.yml`: a Unified login (system-user) token does not expire, so the job only checks, read-only, that Meta still accepts it and fails if not (the daily **status** run does the same). An Instagram login token is refreshed (it must be at least 24 hours old and unexpired) and its new expiry stored. |
+| Under 14 days left | `token-expiring` alert (Instagram login tokens only) |
+| Expired, revoked, or refresh impossible | Generate a new token for the system user in Business settings and re-import it |
+| Suspected compromise | Business settings, then **System users**, then `erodeglitz-publisher`, then **Revoke tokens**; generate and import a new token; check recent posts |
 | Encryption key rotation (yearly) | Add the new key as the next `key_version`, re-encrypt, remove the old key |
 
 ## 9. Cost monitoring and budgets

@@ -13,7 +13,7 @@ await runJob(
         clock,
         username: env.IG_USERNAME,
         owner: env.OWNER_GITHUB_LOGIN,
-        createClient: (accessToken) => createInstagramClient({ fetch: globalThis.fetch, accessToken, graphVersion: env.IG_GRAPH_VERSION }),
+        createClient: (accessToken, api) => createInstagramClient({ fetch: globalThis.fetch, accessToken, api, graphVersion: env.IG_GRAPH_VERSION }),
       },
       { token: env.IG_BOOTSTRAP_TOKEN ?? "", actor: process.env["ACTOR"] ?? "" },
     );
@@ -23,13 +23,15 @@ await runJob(
       return "skipped";
     }
     const { username, expiresAt, quota } = result.value;
-    const d = istDateOf(new Date(expiresAt));
+    const d = expiresAt === undefined ? undefined : istDateOf(new Date(expiresAt));
     appendSummary(
       [
         `### import-token: token stored for @${username}`,
         "- Checked with read-only calls; nothing was posted.",
         "- Stored encrypted in the Sheet bridge's Script properties, not in a Sheet tab.",
-        `- Valid until about ${d.day}.${d.month}.${d.year} (Meta: dashboard tokens last ${DASHBOARD_TOKEN_DAYS} days). The weekly token-refresh run sets the exact date.`,
+        d === undefined
+          ? "- Unified login token: it does not expire. It stops working if the app is removed from the business portfolio."
+          : `- Instagram login token, valid until about ${d.day}.${d.month}.${d.year} (Meta: dashboard tokens last ${DASHBOARD_TOKEN_DAYS} days). The weekly token-refresh run sets the exact date.`,
         `- Instagram publishing quota (rolling 24 h): ${quota.quotaUsage} used of ${quota.quotaTotal ?? "unknown"}`,
         "",
         "**Next:** delete the temporary secret `IG_BOOTSTRAP_TOKEN` (Settings, Secrets and variables, Actions).",

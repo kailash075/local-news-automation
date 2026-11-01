@@ -1,5 +1,5 @@
 {
-  "_note": "Shapes follow Meta's Instagram Platform documentation (content publishing guide and error reference, read 2026-10-29; get-started guide for /me, read 2026-10-31). Values are invented. Not recorded from the live API.",
+  "_note": "Shapes follow Meta's Instagram Platform documentation (content publishing guide and error reference, read 2026-10-29; get-started guides for /me and, for Unified login, /me/assigned_instagram_accounts, read 2026-10-31). Values are invented. Not recorded from the live API.",
   "createContainer": { "id": "17889615691921648" },
   "statusInProgress": { "status_code": "IN_PROGRESS", "id": "17889615691921648" },
   "statusFinished": { "status_code": "FINISHED", "id": "17889615691921648" },
@@ -12,6 +12,7 @@
   "publishingLimitFull": { "data": [{ "quota_usage": 50, "config": { "quota_total": 50, "quota_duration": 86400 } }] },
   "mediaEmpty": { "data": [] },
   "me": { "data": [{ "user_id": "17841400000000000", "username": "erodeglitz" }] },
+  "assignedAccounts": { "data": [{ "id": "17841499999999999", "username": "another.account" }, { "id": "17841400000000000", "username": "erodeglitz" }] },
   "meFlat": { "user_id": "17841400000000000", "username": "erodeglitz", "id": "26000000000000000" },
   "refresh": { "access_token": "IGAAnewtokennewtokennewtokennewtokennewtokennewtoken", "token_type": "bearer", "expires_in": 5183944 },
   "errorSpam": {

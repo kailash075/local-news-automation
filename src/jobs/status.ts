@@ -1,6 +1,7 @@
 import { liveFileExists } from "../config/live.ts";
 import { appendSummary } from "../ops/actions.ts";
 import { registerSecret } from "../ops/logger.ts";
+import { describeClientError } from "../publishing/errors.ts";
 import { createInstagramClient } from "../publishing/instagram-client.ts";
 import { runJob } from "./context.ts";
 
@@ -35,16 +36,26 @@ await runJob("status", async ({ env, stores, clock }) => {
       lines.push("- Instagram token: none imported yet (Phase 2)");
     } else {
       registerSecret(credentials.accessToken);
-      const days = Math.floor((Date.parse(credentials.expiresAt) - now.getTime()) / 86_400_000);
-      lines.push(`- Instagram token for @${env.IG_USERNAME}: expires in ${days} day(s)${days < 14 ? " ⚠ refresh now" : ""}`);
-      const client = createInstagramClient({ fetch: globalThis.fetch, accessToken: credentials.accessToken, graphVersion: env.IG_GRAPH_VERSION });
+      const days = credentials.api === "unified_login" ? undefined : Math.floor((Date.parse(credentials.expiresAt) - now.getTime()) / 86_400_000);
+      lines.push(
+        days === undefined
+          ? `- Instagram token for @${env.IG_USERNAME}: does not expire (Unified login)`
+          : `- Instagram token for @${env.IG_USERNAME}: expires in ${days} day(s)${days < 14 ? " ⚠ refresh now" : ""}`,
+      );
+      const client = createInstagramClient({
+        fetch: globalThis.fetch,
+        accessToken: credentials.accessToken,
+        api: credentials.api,
+        graphVersion: env.IG_GRAPH_VERSION,
+      });
       const quota = await client.getPublishingLimit(credentials.igUserId);
       lines.push(
         quota.ok
           ? `- Instagram publishing quota (rolling 24 h): ${quota.value.quotaUsage} used of ${quota.value.quotaTotal ?? "unknown"}`
-          : "- Instagram publishing quota: could not be read",
+          : `- ⚠ Instagram publishing quota could not be read (${describeClientError(quota.error)}). Publishing is blocked; see OPERATIONS 6.D.`,
       );
-      if (days < 14) process.exitCode = 1;
+      // A Unified login token never nears expiry, so a refused quota read is the only daily sign that it stopped working.
+      if ((days !== undefined && days < 14) || !quota.ok) process.exitCode = 1;
     }
   }
   appendSummary(lines.join("\n"));

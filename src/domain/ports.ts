@@ -182,12 +182,18 @@ export type JobRunStore = {
   }) => Promise<void>;
 };
 
-export type InstagramCredentials = {
-  igUserId: string;
-  accessToken: string;
-  obtainedAt: IsoDateTime;
-  expiresAt: IsoDateTime;
-};
+/**
+ * Which Instagram API a token belongs to. Meta gives new apps only Unified login (since October 2026): a system-user
+ * token for graph.facebook.com that does not expire. The older Instagram login gives a 60-day token for
+ * graph.instagram.com that must be refreshed.
+ */
+export type InstagramApi = "unified_login" | "instagram_login";
+
+type CredentialsBase = { igUserId: string; accessToken: string; obtainedAt: IsoDateTime };
+
+export type InstagramCredentials =
+  | (CredentialsBase & { api: "unified_login" })
+  | (CredentialsBase & { api: "instagram_login"; expiresAt: IsoDateTime });
 
 /** Implementations encrypt the token at rest (AES-256-GCM, key outside the database). */
 export type TokenStore = {

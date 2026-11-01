@@ -8,6 +8,8 @@ const PATTERNS: readonly (readonly [RegExp, string])[] = [
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer [REDACTED]"],
   // Instagram user access tokens (Instagram Login) start with "IG".
   [/\bIG[A-Za-z0-9_-]{30,}/g, "[REDACTED]"],
+  // Graph API tokens (Unified login, system users) start with "EAA". A safety net only: Meta treats tokens as opaque.
+  [/\bEAA[A-Za-z0-9_-]{30,}/g, "[REDACTED]"],
   // Apps Script web app URLs carry the deployment id.
   [/https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+/g, "https://script.google.com/macros/s/[REDACTED]"],
 ];

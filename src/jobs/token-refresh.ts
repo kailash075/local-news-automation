@@ -19,6 +19,23 @@ await runJob(
       return "skipped";
     }
     registerSecret(credentials.accessToken);
+    const client = createInstagramClient({
+      fetch: globalThis.fetch,
+      accessToken: credentials.accessToken,
+      api: credentials.api,
+      graphVersion: env.IG_GRAPH_VERSION,
+    });
+    if (credentials.api === "unified_login") {
+      // Nothing to refresh, but a revoked token or a lost asset assignment must still fail loudly (OPERATIONS 6.D).
+      const quota = await client.getPublishingLimit(credentials.igUserId);
+      if (!quota.ok) {
+        appendSummary(`### token-refresh FAILED\nMeta refused the Unified login token (${describeClientError(quota.error)}). Publishing is blocked; see OPERATIONS 6.D.`);
+        process.exitCode = 1;
+        return "succeeded";
+      }
+      appendSummary("### token-refresh: the Unified login token does not expire, and Meta still accepts it (read-only check). Nothing to refresh.");
+      return "succeeded";
+    }
     const now = clock.now();
     const daysLeft = (Date.parse(credentials.expiresAt) - now.getTime()) / DAY_MS;
     if (now.getTime() - Date.parse(credentials.obtainedAt) < MIN_AGE_MS) {
@@ -26,7 +43,6 @@ await runJob(
       return "skipped";
     }
 
-    const client = createInstagramClient({ fetch: globalThis.fetch, accessToken: credentials.accessToken, graphVersion: env.IG_GRAPH_VERSION });
     const refreshed = await client.refreshToken();
     if (!refreshed.ok) {
       appendSummary(`### token-refresh FAILED\n${describeClientError(refreshed.error)}\nThe current token expires in ${Math.floor(daysLeft)} day(s).`);
@@ -35,6 +51,7 @@ await runJob(
     }
     registerSecret(refreshed.value.accessToken);
     await stores.tokens.saveInstagram({
+      api: "instagram_login",
       igUserId: credentials.igUserId,
       accessToken: refreshed.value.accessToken,
       obtainedAt: toIso(now),

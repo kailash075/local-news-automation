@@ -1,8 +1,9 @@
 name: token-refresh
-# Coimbatore 360 refreshes its token weekly from Apps Script; here a weekly job refreshes the 60-day Instagram token through
+# Coimbatore 360 refreshes its token weekly from Apps Script; here a weekly job refreshes a 60-day Instagram login token through
 # the official refresh_access_token endpoint and stores it encrypted in the Sheet bridge's Script properties. It fails loudly (GitHub e-mails the
 # owner) when the token cannot be refreshed or has fewer than 14 days left. It runs whether or not the page is live, so the
-# token stays valid; until a token is imported it only reports that there is nothing to do.
+# token stays valid. A Unified login (system-user) token does not expire; for it the job only checks, read-only, that Meta
+# still accepts it, and fails loudly if not. Until a token is imported it only reports that there is nothing to do.
 on:
   schedule:
     - cron: "17 3 * * 1"

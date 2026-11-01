@@ -1,6 +1,6 @@
 name: publish
 # Coimbatore 360 "post.yml", Erode version. Publishes at most one approved story per run through the official Instagram API
-# (graph.instagram.com): create container -> wait for FINISHED -> media_publish. Every gate is checked again right before
+# (graph.facebook.com): create container -> wait for FINISHED -> media_publish. Every gate is checked again right before
 # media_publish. Switches, as in Coimbatore 360: real posts happen only while a file named LIVE is in the repository root,
 # and the repository variable PAUSED = "true" stops all posting. A manual run is a dry run unless you untick it.
 # On top of that, every story needs an editor's /approve, and /killswitch on <reason> on any issue stops all posting.

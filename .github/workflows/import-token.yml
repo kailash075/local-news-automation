@@ -1,7 +1,8 @@
 name: import-token
 # Phase 2, run by hand: once, and again only if a token ever has to be generated anew (SETUP_GUIDE §6.3). Reads the temporary
-# IG_BOOTSTRAP_TOKEN secret, checks with read-only calls that it belongs to @erodeglitz and can read the publishing quota,
-# and stores it encrypted in the Sheet bridge's Script properties. Nothing is posted. Only OWNER_GITHUB_LOGIN can import.
+# IG_BOOTSTRAP_TOKEN secret, checks with read-only calls that it reaches @erodeglitz and can read the publishing quota
+# (Unified login on graph.facebook.com first, then the older Instagram login on graph.instagram.com), and stores it
+# encrypted in the Sheet bridge's Script properties. Nothing is posted. Only OWNER_GITHUB_LOGIN can import.
 # Delete IG_BOOTSTRAP_TOKEN after a successful run.
 on:
   workflow_dispatch:

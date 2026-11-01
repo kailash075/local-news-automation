@@ -36,13 +36,13 @@ State lives in a Google Sheet behind an Apps Script web app, plus queue and log 
 | Neighbour districts are rejected even when close; a story naming both a Coimbatore place and a neighbour is kept | Same rule with an Erode gazetteer and a neighbour list (Tiruppur, Coimbatore, Salem, Namakkal, Karur, Nilgiris, Chamarajanagar) |
 | Same event from two outlets is posted once | MinHash near-duplicate clustering, plus a check against everything published in the last 7 days |
 | Reads Instagram's live `content_publishing_limit` before posting | Same, and our own cap is far lower (6 a day) |
-| Weekly refresh of the 60-day Instagram token | `token-refresh.yml`, token stored encrypted in the bridge's Script properties |
+| Weekly refresh of the 60-day Instagram token | Meta gives new apps only Unified login, whose system-user token does not expire. It is stored encrypted in the bridge's Script properties; `token-refresh.yml` still refreshes a 60-day Instagram login token if one is ever imported. |
 | `ig_probe.yml` health check | `status.yml`, read-only, daily |
 | Google Sheet as the working store, reached through an Apps Script web app with a key | Same idea: one tab per table in the `ErodeGlitz Newsroom` Sheet, reached only through `apps-script/Code.gs` (written for ErodeGlitz). The key travels in the request body, not the URL; writes hold the script lock; decisions, evidence and errors are append-only. Owner decision, 2026-10-30. |
 | Images on Cloudinary, so Instagram can download them | Same, with signed uploads (no unsigned preset) |
 | Regression tests named after real incidents, run on every push | `ci.yml` runs typecheck, lint and Vitest on every push |
 | Finished media kept so a retry does not rebuild | Rendered cards are content-addressed on Cloudinary (named by a SHA-256 of the card's template version and text); a rerun reuses them |
-| Official Instagram API (`graph.instagram.com`, `media` then `media_publish`) | Same API, same login type |
+| Official Instagram API (`graph.instagram.com`, `media` then `media_publish`) | Same API calls, but through Unified login on `graph.facebook.com`, because Meta no longer offers new apps the Instagram login setup (2026-10-31) |
 
 ## 3. What ErodeGlitz deliberately does differently
 

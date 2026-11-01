@@ -854,20 +854,23 @@ const createJobRunStore = (bridge: BridgeClient, clock: Clock): JobRunStore => (
 export const INSTAGRAM_TOKEN_SECRET = "instagram_token";
 const tokenAad = (name: string): string => `erodeglitz.secrets:${name}`;
 
-const StoredCredentialsSchema = z.strictObject({
+const credentialsBase = {
   igUserId: z.string().regex(/^\d+$/),
   accessToken: z.string().min(1),
   obtainedAt: IsoDateTimeSchema,
-  expiresAt: IsoDateTimeSchema,
-}) satisfies z.ZodType<InstagramCredentials>;
+};
+const StoredCredentialsSchema = z.discriminatedUnion("api", [
+  z.strictObject({ ...credentialsBase, api: z.literal("unified_login") }),
+  z.strictObject({ ...credentialsBase, api: z.literal("instagram_login"), expiresAt: IsoDateTimeSchema }),
+]) satisfies z.ZodType<InstagramCredentials>;
 
 const EnvelopeSchema = z.strictObject({
   keyVersion: z.number().int().min(1),
   iv: z.base64(),
   authTag: z.base64(),
   ciphertext: z.base64(),
-  /** Readable without the key, for expiry alerts. */
-  expiresAt: IsoDateTimeSchema,
+  /** Readable without the key, for expiry alerts. Absent for a token that does not expire. */
+  expiresAt: IsoDateTimeSchema.optional(),
 });
 
 const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
@@ -902,7 +905,7 @@ const createTokenStore = (bridge: BridgeClient, key: Uint8Array | undefined, key
         iv: b64(enc.iv),
         authTag: b64(enc.authTag),
         ciphertext: b64(enc.ciphertext),
-        expiresAt: valid.expiresAt,
+        ...(valid.api === "instagram_login" ? { expiresAt: valid.expiresAt } : {}),
       };
       await bridge.secretPut(INSTAGRAM_TOKEN_SECRET, JSON.stringify(envelope));
     },

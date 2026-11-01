@@ -4,7 +4,7 @@ import { loadEnv } from "../../src/config/env.ts";
 import { PublicationIdSchema } from "../../src/domain/types.ts";
 import { toIso } from "../../src/publishing/ist.ts";
 import { composeCaption, publishOne, reconcileUnknown } from "../../src/publishing/publisher.ts";
-import { approval, credentials, fixtures, json, makeDraft, networkError, TOKEN, world } from "./fakes.ts";
+import { approval, credentials, fixtures, json, makeDraft, networkError, TOKEN, unifiedCredentials, world } from "./fakes.ts";
 
 describe("publishOne: happy path", () => {
   it("creates one container, publishes it once, and records the permalink", async () => {
@@ -20,6 +20,14 @@ describe("publishOne: happy path", () => {
     const createBody = JSON.parse(w.meta.calls.find((c) => c.endpoint === "create")?.body ?? "{}") as Record<string, string>;
     expect(createBody["caption"]).toBe(composeCaption(w.draft));
     expect(createBody["alt_text"]).toBe(w.draft.altText);
+  });
+
+  it("publishes with a Unified login token on graph.facebook.com", async () => {
+    const w = await world({ token: unifiedCredentials() });
+    const outcome = await publishOne(w.deps);
+    expect(outcome).toMatchObject({ kind: "published", mediaId: fixtures.publish.id });
+    expect(w.meta.calls.length).toBeGreaterThan(0);
+    expect(w.meta.calls.every((c) => c.url.startsWith("https://graph.facebook.com/v26.0/"))).toBe(true);
   });
 
   it("does nothing when no publication is due", async () => {

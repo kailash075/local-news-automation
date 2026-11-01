@@ -1,12 +1,12 @@
 # Instagram Compliance
 
-> **Status:** policy for the planned system. Checked against Meta's official documentation on **2026-10-29**.
+> **Status:** policy for the planned system. Checked against Meta's official documentation on **2026-10-29**; the login type, token and permissions (§3, §7) again on **2026-11-01**.
 > Re-check every quarter, before each phase goes live, and whenever Meta announces a new Graph API version. Record each check in §13.
 > This document is not legal advice.
 
 ## 1. Rules this project follows
 
-ErodeGlitz publishes only through **Meta's official Instagram Platform API**, to **its own** Instagram professional account, using a token obtained through **Meta's own login or dashboard flow**.
+ErodeGlitz publishes only through **Meta's official Instagram Platform API**, to **its own** Instagram professional account, using a token obtained through **Meta's own login, dashboard or Business settings flow**.
 
 ## 2. Prohibited methods (never, in any phase)
 
@@ -28,23 +28,23 @@ A code review that finds any of these is a release blocker.
 |---|---|
 | Account type | Instagram **professional** account (Business or Creator) |
 | App type | Meta app of type **Business** |
-| Integration | **Instagram API with Instagram Login** (Business Login for Instagram). No Facebook Page needed. |
-| Host | `graph.instagram.com` |
-| Token | Instagram User access token, long-lived |
-| Permissions | `instagram_business_basic`, `instagram_business_content_publish`. Older `business_*` scope names were deprecated on 2025-01-27; do not use them. |
+| Integration | **Instagram API with Unified login** (a Facebook Login for Business configuration in a business portfolio). On 2026-10-31 the dashboard said: "API setup with Instagram login is not available for newer apps. Your app uses API setup with Unified login instead." Meta: "Your clients don't need a Facebook Page." |
+| Host | `graph.facebook.com`, with the Instagram account ID in the path |
+| Token | A system user's access token, made in Business settings with expiry **Never** ([setup guide §6.3](SETUP_GUIDE.md#63-token-manual-approval)). Meta's Unified login pages describe the Business Integration System User token from the dashboard's **Generate token**, which showed no token for us; Meta also says "You can also generate a System User Access Token using the Business Manager UI." Same node type and the same two permissions, so it is expected to behave the same; the import confirms it with read-only calls. |
+| Permissions | `instagram_basic`, `instagram_content_publish` (the content publishing guide's Unified Login column). The account ID comes from `GET /me/assigned_instagram_accounts`, which needs `instagram_basic`. The dashboard configuration also lists `instagram_manage_messages`, which Meta marks as required there; the system user's token does not carry it. |
 | Access level | **Standard Access.** Meta: Standard Access is "intended for apps that will only be used by people who have roles on them". Meta's App Review table lists "My app is only for a business I own or manage" as Standard Access with App Review **not required**. |
 | Advanced Access | Not needed and not requested. It would require App Review and Business Verification, and is for serving accounts we don't own or manage. |
-| App settings | A privacy policy URL is an App Settings field. Whether development mode allows publishing to our own account was not stated on the pages checked; verify during Phase 2 setup. |
+| App settings | A privacy policy URL is an App Settings field. The app is in development mode. Meta's App modes page says "Any data generated while an app is in Development mode, such as test posts, can only be seen by role users"; the Instagram pages do not say whether that covers Instagram posts, so check the first real post from a logged-out browser. |
 
 Other configurations Meta offers, for reference:
 
+- **Instagram API with Instagram Login** (Business Login for Instagram): `graph.instagram.com`; Instagram User access token, valid 60 days and refreshable; permissions `instagram_business_basic`, `instagram_business_content_publish`. No longer offered to new apps (2026-10-31). The code still accepts such a token, in case one is ever imported.
 - **Instagram API with Facebook Login for Business:** `graph.facebook.com`; the account must be linked to a Facebook Page; Page access token; permissions `instagram_basic`, `instagram_content_publish`, `pages_read_engagement`, plus `ads_management` or `ads_read` if the user has a Business Manager role on the Page.
-- **Instagram API with Unified Login:** recommended by Meta "for new integrations"; uses a Business Integration System User access token; needs a business portfolio but no Page; `graph.facebook.com`. The pages checked did not explain how to obtain that token. Re-evaluate in Phase 2, because a system-user token might remove the 60-day refresh cycle (unverified).
 
 ## 4. API version policy
 
 - The latest Graph API version when checked was **v26.0** (introduced 2026-07-29). v25.0 is available until 2028-07-29.
-- The version is pinned in configuration (`IG_GRAPH_API_VERSION`). The changelog is reviewed every quarter, and the version is upgraded at least 6 months before the pinned one expires, after contract tests pass.
+- The version is pinned in configuration (`IG_GRAPH_VERSION`). The changelog is reviewed every quarter, and the version is upgraded at least 6 months before the pinned one expires, after contract tests pass.
 
 ## 5. Publishing flow (official)
 
@@ -79,12 +79,14 @@ How the project applies this is described in [Architecture §5.10](ARCHITECTURE.
 
 | Fact (official) | Project handling |
 |---|---|
-| Dashboard-generated tokens are long-lived, valid 60 days | Imported once from a temporary GitHub secret, then stored encrypted (AES-256-GCM) in the Sheet bridge's Script properties, never in a Sheet tab |
-| Refresh: `GET https://graph.instagram.com/refresh_access_token` with `grant_type=ig_refresh_token`; the token must be at least 24 h old and unexpired, with `instagram_business_basic` granted | Weekly refresh job; alert below 14 days of remaining validity |
-| A token not refreshed within 60 days expires and cannot be refreshed | Runbook: generate a new token in the dashboard and re-import it ([Operations §8](OPERATIONS.md#8-token-lifecycle)) |
+| A system user's token made with expiry Never does not expire | Imported once from a temporary GitHub secret, then stored encrypted (AES-256-GCM) in the Sheet bridge's Script properties, never in a Sheet tab |
+| It stops working if it is revoked, if the system user loses the Instagram account or the app, or if the app leaves the business portfolio | The weekly `token-refresh.yml` and the daily `status.yml` read the publishing quota (read-only) and fail loudly if Meta refuses the token; runbook [Operations 6.D](OPERATIONS.md#6d-token-expired-or-invalid) |
+| Instagram login only: dashboard tokens are long-lived, valid 60 days; refresh with `GET https://graph.instagram.com/refresh_access_token` and `grant_type=ig_refresh_token`, at least 24 h old and unexpired, with `instagram_business_basic` granted | Weekly refresh job; alert below 14 days of remaining validity |
+| Instagram login only: a token not refreshed within 60 days expires and cannot be refreshed | Runbook: generate a new token and re-import it ([Operations §8](OPERATIONS.md#8-token-lifecycle)) |
+| "Do not parse, decode, or make assumptions about the format of an access token" | Token-shaped redaction patterns (`IG…`, `EAA…`) are only a safety net; no logic looks inside the token |
 | Long-lived token exchange "must be made in server-side code" | Never handled in a browser |
 
-The token never appears in logs, URLs that are logged, issue comments, LLM prompts or artifacts. The publisher sends it in a header where the endpoint supports that (to be verified in Phase 2), and the logger redacts `access_token` everywhere.
+The token never appears in logs, URLs that are logged, issue comments, LLM prompts or artifacts. The client sends it as an `Authorization: Bearer` header, as the content publishing guide's examples do (only Instagram login's `refresh_access_token` takes it as a query parameter), and the logger redacts `access_token` everywhere.
 
 ## 8. Error handling
 
@@ -145,8 +147,8 @@ At most `MAX_POSTS_PER_DAY` posts, at least `MIN_MINUTES_BETWEEN_POSTS` apart, o
 
 ## 13. Go-live compliance checklist (Phase 2)
 
-- [ ] Account is professional; two-factor authentication is on for Instagram and Meta (Instagram: Creator account with two-factor on since 2026-10-30; Meta developer account still to do)
-- [ ] App type is Business; only `instagram_business_basic` and `instagram_business_content_publish` granted
+- [x] Account is professional; two-factor authentication is on for Instagram and Meta (Instagram: Creator account with two-factor on since 2026-10-30; Meta account since 2026-10-31)
+- [x] App type is Business; the token carries only `instagram_basic` and `instagram_content_publish` (system user with Content access to `erodeglitz` and the Develop app role, 2026-10-31)
 - [ ] No Advanced Access requested
 - [ ] Privacy policy page live on GitHub Pages (public `erodeglitz-site` repository) and set in App Settings
 - [ ] Token stored only encrypted; temporary secret deleted; redaction test passing
@@ -162,6 +164,7 @@ Verification log:
 | Date | Checked by | Result |
 |---|---|---|
 | 2026-10-29 | Planning (Claude Code) | Documentation reviewed; nothing configured yet |
+| 2026-11-01 | Claude Code, from the owner's dashboard screens and Meta's pages | Unified login is the only setup for new apps; token from a Business-settings system user; §3 and §7 updated |
 
 ### Other platform policies that affect this design
 
@@ -170,7 +173,11 @@ Verification log:
 
 ## 14. References
 
-Official Meta documentation (checked 2026-10-29):
+Official Meta documentation (checked 2026-10-29; the Unified login and system-user pages on 2026-11-01):
+
+- Instagram API with Unified login: <https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/>, its get-started guide <https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started> and authentication page <https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/authentication>
+- System user access tokens: <https://developers.facebook.com/documentation/facebook-login/guides/access-tokens#systemusertokens>
+- System user assigned Instagram accounts: <https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/system-user/assigned_instagram_accounts>
 
 - Content publishing: <https://developers.facebook.com/docs/instagram-platform/content-publishing/>
 - Instagram Platform overview: <https://developers.facebook.com/docs/instagram-platform/overview>

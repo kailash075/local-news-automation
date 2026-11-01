@@ -1,6 +1,6 @@
 import type { Env } from "../config/env.ts";
 import { composeCaption } from "../captions/caption.ts";
-import type { Clock, ObjectStore, Stores } from "../domain/ports.ts";
+import type { Clock, InstagramCredentials, ObjectStore, Stores } from "../domain/ports.ts";
 import { transition, type StoryEventType } from "../domain/story-state.ts";
 import type {
   DraftRevision,
@@ -17,7 +17,7 @@ import { sha256Hex } from "../review/revision-hash.ts";
 import { actionFor, backoffMs, classifyError, describeClientError, MAX_TRANSIENT_ATTEMPTS, type ErrorClass } from "./errors.ts";
 import { evaluateGates, type GateCode, type GateReason } from "./gates.ts";
 import { startOfIstDay, toIso } from "./ist.ts";
-import type { ContainerStatus, InstagramClient, InstagramClientError, RecentMedia } from "./instagram-client.ts";
+import { tokenExpiry, tokenValid, type ContainerStatus, type InstagramClient, type InstagramClientError, type RecentMedia } from "./instagram-client.ts";
 
 /**
  * Publisher (docs/ARCHITECTURE.md §5.10). One publication per run, to respect spacing.
@@ -63,7 +63,7 @@ export type PublisherDeps = {
   live: boolean;
   stores: Pick<Stores, "settings" | "publications" | "tokens" | "stories" | "drafts" | "decisions" | "evidence">;
   objects: Pick<ObjectStore, "publicUrl">;
-  createClient: (accessToken: string) => InstagramClient;
+  createClient: (credentials: InstagramCredentials) => InstagramClient;
   checkContent: (story: Story, draft: DraftRevision) => Promise<ContentChecks>;
   clock: Clock;
   sleep: (ms: number) => Promise<void>;
@@ -237,9 +237,7 @@ export const publishOne = async (deps: PublisherDeps): Promise<PublishOutcome> =
       deps.checkContent(story, draft),
     ]);
 
-  const tokenExpiresAt = credentials === undefined ? undefined : new Date(credentials.expiresAt);
-  const tokenUsable = tokenExpiresAt !== undefined && tokenExpiresAt.getTime() > now.getTime();
-  const client = credentials !== undefined && tokenUsable ? deps.createClient(credentials.accessToken) : undefined;
+  const client = credentials !== undefined && tokenValid(credentials, now) ? deps.createClient(credentials) : undefined;
 
   // Reading the quota is not a write; it needs a usable token.
   let quota: { usage: number; total: number } | undefined;
@@ -270,7 +268,7 @@ export const publishOne = async (deps: PublisherDeps): Promise<PublishOutcome> =
       lastPublishedAt,
     },
     quota,
-    token: { present: credentials !== undefined, ...(tokenExpiresAt === undefined ? {} : { expiresAt: tokenExpiresAt }) },
+    token: credentials === undefined ? { present: false } : { present: true, expiresAt: tokenExpiry(credentials) },
   });
 
   if (!gates.pass) {
@@ -525,8 +523,8 @@ export const reconcileUnknown = async (deps: ReconcileDeps): Promise<ReconcileRe
   const unknowns = await stores.publications.listByStatus("publish_unknown");
   const report: ReconcileReport = { checked: 0, resolvedPublished: 0, resolvedNotPublished: 0, unresolved: 0, killSwitchTripped: false };
   const credentials = await stores.tokens.getInstagram();
-  const usable = credentials !== undefined && Date.parse(credentials.expiresAt) > deps.clock.now().getTime();
-  const client = usable ? deps.createClient(credentials.accessToken) : undefined;
+  const usable = credentials !== undefined && tokenValid(credentials, deps.clock.now());
+  const client = usable ? deps.createClient(credentials) : undefined;
 
   for (const u of unknowns) {
     report.checked++;

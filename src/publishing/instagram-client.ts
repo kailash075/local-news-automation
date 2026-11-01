@@ -1,15 +1,20 @@
 import { z } from "zod";
+import type { InstagramApi, InstagramCredentials } from "../domain/ports.ts";
 import { err, ok, type Result } from "../lib/result.ts";
 
 /**
- * Client for the Instagram API with Instagram Login (host graph.instagram.com).
- * Endpoints and fields follow Meta's content publishing guide as read on 2026-10-29.
+ * Client for the Instagram API, in either of Meta's two setups (see `InstagramApi`): Unified login on
+ * graph.facebook.com (the only setup Meta gives new apps; its docs read on 2026-10-31) or Instagram login on
+ * graph.instagram.com. The publishing endpoints and fields are the same on both hosts and follow Meta's content
+ * publishing guide as read on 2026-10-29. Only finding the account and renewing the token differ.
  * To confirm in Phase 2 against the live API, before the first real post:
  *  - that `Authorization: Bearer` header auth and JSON request bodies are accepted on every endpoint used here;
  *  - the exact field names of `content_publishing_limit` (`quota_usage`, `config.quota_total`, `config.quota_duration`);
- *  - that `alt_text` is accepted on image containers for this login type;
- *  - the shape of `GET /me`: the get-started guide (read 2026-10-31) shows its fields inside a `data` array, so both that
- *    and a plain object are accepted.
+ *  - that `alt_text` is accepted on image containers;
+ *  - Unified login: that the system user's token from Business settings lists @erodeglitz under
+ *    `GET /me/assigned_instagram_accounts` (Meta documents that edge for the dashboard's token, which never appeared);
+ *  - Instagram login: the shape of `GET /me` (the guide shows its fields inside a `data` array, so both that and a plain
+ *    object are accepted).
  * The access token is never placed in a URL, except for `refresh_access_token`, which Meta documents only with a
  * query parameter. That URL is never logged and errors are redacted.
  */
@@ -44,6 +49,15 @@ export type RefreshedToken = { accessToken: string; expiresInSeconds: number };
 /** `userId` is the account ID used in publishing URLs. */
 export type AccountInfo = { userId: string; username: string };
 
+/** When the token stops working. Unified login's system-user token does not expire. */
+export const tokenExpiry = (credentials: InstagramCredentials): Date | "never" =>
+  credentials.api === "unified_login" ? "never" : new Date(credentials.expiresAt);
+
+export const tokenValid = (credentials: InstagramCredentials, now: Date): boolean => {
+  const expiry = tokenExpiry(credentials);
+  return expiry === "never" || expiry.getTime() > now.getTime();
+};
+
 export type InstagramClient = {
   createImageContainer: (p: {
     igUserId: string;
@@ -56,9 +70,10 @@ export type InstagramClient = {
   getPermalink: (mediaId: string) => Promise<Result<{ permalink: string }, InstagramClientError>>;
   getPublishingLimit: (igUserId: string) => Promise<Result<PublishingLimit, InstagramClientError>>;
   listRecentMedia: (igUserId: string, limit?: number) => Promise<Result<readonly RecentMedia[], InstagramClientError>>;
+  /** Instagram login tokens only: Unified login tokens do not expire. */
   refreshToken: () => Promise<Result<RefreshedToken, InstagramClientError>>;
-  /** Read-only: the account the token belongs to. */
-  getAccount: () => Promise<Result<AccountInfo, InstagramClientError>>;
+  /** Read-only: the Instagram accounts the token can use. */
+  listAccounts: () => Promise<Result<readonly AccountInfo[], InstagramClientError>>;
 };
 
 export type FetchFn = (input: string, init: RequestInit) => Promise<Response>;
@@ -66,12 +81,16 @@ export type FetchFn = (input: string, init: RequestInit) => Promise<Response>;
 export type InstagramClientOptions = {
   fetch: FetchFn;
   accessToken: string;
+  api: InstagramApi;
   /** For example "v26.0". */
   graphVersion: string;
   timeoutMs?: number;
 };
 
-export const GRAPH_HOST = "https://graph.instagram.com";
+export const GRAPH_HOSTS: Readonly<Record<InstagramApi, string>> = {
+  unified_login: "https://graph.facebook.com",
+  instagram_login: "https://graph.instagram.com",
+};
 
 // ---------------------------------------------------------------- response schemas
 
@@ -101,9 +120,13 @@ const MediaListResponse = z.object({
     }),
   ),
 });
-/** The ID stays a string: a 17-digit ID sent as a JSON number would already have lost digits. */
-const AccountFields = z.object({ user_id: z.string().regex(/^\d+$/), username: z.string().min(1) });
-const AccountResponse = z.union([AccountFields, z.object({ data: z.tuple([AccountFields]) })]);
+/** IDs stay strings: a 17-digit ID sent as a JSON number would already have lost digits. */
+const AccountId = z.string().regex(/^\d+$/);
+const InstagramLoginAccount = z.object({ user_id: AccountId, username: z.string().min(1) });
+/** Instagram login's `/me`: the guide shows the fields inside a one-element `data` array; a plain object is accepted too. */
+const InstagramLoginMe = z.union([InstagramLoginAccount, z.object({ data: z.tuple([InstagramLoginAccount]) })]);
+/** Unified login's `/me/assigned_instagram_accounts`. */
+const AssignedAccounts = z.object({ data: z.array(z.object({ id: AccountId, username: z.string().min(1) })) });
 const RefreshResponse = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().int().positive(),
@@ -130,7 +153,8 @@ export const redact = (text: string, secrets: readonly string[] = []): string =>
   return out
     .replace(/(access_token|ig_exchange_token|client_secret)=[^&\s"']+/gi, "$1=[REDACTED]")
     .replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [REDACTED]")
-    .replace(/\bIG[A-Za-z0-9_-]{40,}\b/g, "[REDACTED]");
+    .replace(/\bIG[A-Za-z0-9_-]{40,}\b/g, "[REDACTED]")
+    .replace(/\bEAA[A-Za-z0-9_-]{30,}\b/g, "[REDACTED]");
 };
 
 /** Network failures that happen before any byte of the request can have been sent. */
@@ -148,9 +172,9 @@ const errorMessage = (e: unknown): string => (e instanceof Error ? `${e.name}: $
 // ---------------------------------------------------------------- client
 
 export const createInstagramClient = (options: InstagramClientOptions): InstagramClient => {
-  const { accessToken, graphVersion } = options;
+  const { accessToken, api, graphVersion } = options;
   const timeoutMs = options.timeoutMs ?? 30_000;
-  const base = `${GRAPH_HOST}/${graphVersion}`;
+  const base = `${GRAPH_HOSTS[api]}/${graphVersion}`;
   const secrets = [accessToken];
 
   const call = async <T>(
@@ -275,16 +299,21 @@ export const createInstagramClient = (options: InstagramClientOptions): Instagra
 
     refreshToken: async () => {
       // Documented only with the token as a query parameter. This URL must never be logged.
-      const url = `${GRAPH_HOST}/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(accessToken)}`;
+      const url = `${GRAPH_HOSTS.instagram_login}/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(accessToken)}`;
       const r = await call("GET", url, RefreshResponse, undefined, "none");
       return r.ok ? ok({ accessToken: r.value.access_token, expiresInSeconds: r.value.expires_in }) : r;
     },
 
-    getAccount: async () => {
-      const r = await call("GET", `${path("me")}?fields=user_id,username`, AccountResponse);
+    listAccounts: async () => {
+      if (api === "unified_login") {
+        // `/me` is the business's system user here; the accounts the business shared are listed separately.
+        const r = await call("GET", `${path("me", "assigned_instagram_accounts")}?fields=id,username`, AssignedAccounts);
+        return r.ok ? ok(r.value.data.map((a) => ({ userId: a.id, username: a.username }))) : r;
+      }
+      const r = await call("GET", `${path("me")}?fields=user_id,username`, InstagramLoginMe);
       if (!r.ok) return r;
       const fields = "data" in r.value ? r.value.data[0] : r.value;
-      return ok({ userId: fields.user_id, username: fields.username });
+      return ok([{ userId: fields.user_id, username: fields.username }]);
     },
   };
 };
